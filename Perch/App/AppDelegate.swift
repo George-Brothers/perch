@@ -5,8 +5,9 @@ import SwiftUI
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var menuBar: MenuBarController!
+    private var engine: LayoutEngine!
     private var settings: SettingsWindowController!
-    private var panel: PanelController!
+    private var arrangePanel: PanelController!
 
     static func main() {
         let app = NSApplication.shared
@@ -22,45 +23,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let preferences = Preferences.shared
         let permissions = Permissions.shared
         let menuBar = MenuBarController(preferences: preferences)
+        let engine = LayoutEngine(preferences: preferences, permissions: permissions, menuBar: menuBar)
         self.menuBar = menuBar
+        self.engine = engine
 
         settings = SettingsWindowController { navigation in
             AnyView(SettingsView(navigation: navigation, preferences: preferences,
-                                 permissions: permissions, menuBar: menuBar))
-        }
-        menuBar.openSettings = { [weak self] pane in
-            self?.panel.close()
-            self?.settings.show(pane: pane)
+                                 permissions: permissions, engine: engine))
         }
 
-        let panelModel = PanelModel(permissions: permissions, menuBar: menuBar)
-        panel = PanelController(model: panelModel) { [weak self] in
-            AnyView(PanelView(
-                model: panelModel,
-                permissions: permissions,
-                menuBar: menuBar,
+        arrangePanel = PanelController(model: engine) { [weak self] in
+            AnyView(ArrangePanelView(
+                engine: engine,
                 preferences: preferences,
+                permissions: permissions,
                 onOpenItem: { item in
-                    self?.panel.close()
+                    self?.arrangePanel.close()
                     menuBar.open(item)
                 },
-                onToggleBar: {
-                    self?.panel.close()
-                    menuBar.toggle(showArchived: false)
-                },
                 onOpenSettings: {
-                    self?.panel.close()
-                    self?.settings.show(pane: nil)
+                    self?.arrangePanel.close()
+                    self?.settings.show(pane: .general)
                 }
             ))
         }
-        menuBar.togglePanel = { [weak self] anchor in
-            self?.panel.toggle(anchor: anchor)
+
+        menuBar.openSettings = { [weak self] pane in
+            self?.arrangePanel.close()
+            self?.settings.show(pane: pane)
+        }
+        menuBar.openArrange = { [weak self] anchor in
+            self?.arrangePanel.toggle(anchor: anchor)
         }
 
-        if !preferences.hasSeenWelcome {
-            preferences.hasSeenWelcome = true
-            settings.show(pane: .sections)
+        // First launch: Perch needs Accessibility to arrange anything, so show
+        // the Arrange list (which asks for it) instead of a tutorial.
+        if !permissions.hasAccessibility {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                self?.arrangePanel.open(anchor: menuBar.perchButton)
+            }
         }
     }
 

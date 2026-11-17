@@ -6,19 +6,9 @@ struct MenuBarItem: Identifiable {
     enum Section: Int, CaseIterable {
         case hidden
         case shown
-        case archived
         /// macOS isn't drawing it: the app's icon is turned off in
-        /// System Settings → Menu Bar, or there was no room for it.
+        /// System Settings → Menu Bar.
         case notShowing
-
-        var title: String {
-            switch self {
-            case .hidden: "Hidden"
-            case .shown: "Shown"
-            case .archived: "Archived"
-            case .notShowing: "Not in the menu bar"
-            }
-        }
     }
 
     let id: String
@@ -36,14 +26,19 @@ struct MenuBarItem: Identifiable {
     let isInMenuBar: Bool
     var section: Section = .shown
 
+    /// Stable name for saving this icon's priority across launches.
+    var key: String { id }
+
     var displayName: String {
         if let identifier, let name = Self.systemNames[identifier] { return name }
         if bundleID == "com.apple.controlcenter" || bundleID == "com.apple.systemuiserver",
            let label, !label.isEmpty {
             return String(label.split(separator: ",").first ?? Substring(label))
         }
-        return appName
+        return Self.prettyAppNames[appName] ?? appName
     }
+
+    private static let prettyAppNames = ["GeminiAppLauncher": "Gemini"]
 
     /// SF Symbol for Apple's own items, which have no app icon of their own.
     var systemSymbol: String? {

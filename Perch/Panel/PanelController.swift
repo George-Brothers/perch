@@ -5,7 +5,7 @@ import SwiftUI
 /// reuse, and listens for outside clicks only while it's open.
 @MainActor
 final class PanelController {
-    private let model: PanelModel
+    private let model: LayoutEngine
     private let makeContent: () -> AnyView
     private var panel: PerchPanel?
     private weak var anchor: NSStatusBarButton?
@@ -13,7 +13,7 @@ final class PanelController {
     private var keyMonitor: Any?
     private var resizeObserver: NSObjectProtocol?
 
-    init(model: PanelModel, makeContent: @escaping () -> AnyView) {
+    init(model: LayoutEngine, makeContent: @escaping () -> AnyView) {
         self.model = model
         self.makeContent = makeContent
     }
@@ -113,4 +113,13 @@ final class PanelController {
 /// A borderless panel that can still take key events (for Escape).
 final class PerchPanel: NSPanel {
     override var canBecomeKey: Bool { true }
+
+    /// Perch never becomes the active app, so the panel may not be key when you
+    /// click it. Make it key first so the very first click reaches the control.
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .leftMouseDown, !isKeyWindow {
+            makeKey()
+        }
+        super.sendEvent(event)
+    }
 }

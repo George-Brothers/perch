@@ -1,0 +1,209 @@
+import AppKit
+import Combine
+import os
+
+/// Keeps the menu bar arranged by your priorities: every "Always" icon and as
+/// many "Auto" icons as fit stay right of the divider; the rest go left of it.
+///
+/// It reacts to events only (launch, a priority change, a display change, wake,
+/// an app opening or quitting) and moves nothing when the bar is already right.
+@MainActor
+final class LayoutEngine: ObservableObject {
+    @Published private(set) var items: [MenuBarItem] = []
+    @Published private(set) var hasScanned = false
+    @Published private(set) var isArranging = false
+
+    private let preferences: Preferences
+    private let permissions: Permissions
+    private let menuBar: MenuBarController
+    private let log = Logger(subsystem: "com.georgebrothers.perch", category: "layout")
+    private var cancellables = Set<AnyCancellable>()
+    private var observers: [NSObjectProtocol] = []
+    private var pendingArrange: DispatchWorkItem?
+    private var arrangeAgain = false
+    private var knownKeys: Set<String> = []
+
+    /// Apple's in-use indicator (the orange mic pill) can't be moved.
+    private static let unmovableIdentifiers: Set<String> = ["com.apple.menuextra.audiovideo"]
+
+    init(preferences: Preferences, permissions: Permissions, menuBar: MenuBarController) {
+        self.preferences = preferences
+        self.permissions = permissions
+        self.menuBar = menuBar
+        observeTriggers()
+    }
+
+    func priority(of item: MenuBarItem) -> IconPriority {
+        preferences.priority(for: item.key)
+    }
+
+    func setPriority(_ priority: IconPriority, for item: MenuBarItem) {
+        preferences.setPriority(priority, for: item.key)
+    }
+
+    /// Rescans so the Arrange list is current. Cheap; runs when the list opens.
+    func refresh() {
+        Task { await scan() }
+    }
+
+    /// Asks for an arrange pass after `delay`. Repeated requests collapse into one.
+    func scheduleArrange(after delay: TimeInterval = 0.4) {
+        pendingArrange?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            Task { await self?.arrange() }
+        }
+        pendingArrange = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    // MARK: - Scanning
+
+    @discardableResult
+    private func scan() async -> [MenuBarItem] {
+        permissions.refresh()
+        guard permissions.hasAccessibility else {
+            items = []
+            return []
+        }
+        let found = await MenuBarScanner.scan()
+        let dividerMidX = menuBar.dividerFrame()?.midX
+        items = found.map { item in
+            var item = item
+            if !item.isInMenuBar {
+                item.section = .notShowing
+            } else if let dividerMidX, item.frame.midX < dividerMidX {
+                item.section = .hidden
+            } else {
+                item.section = .shown
+            }
+            return item
+        }
+        hasScanned = true
+        return items
+    }
+
+    // MARK: - Arranging
+
+    private struct Move {
+        let item: MenuBarItem
+        let show: Bool
+    }
+
+    private func arrange() async {
+        guard !isArranging else {
+            arrangeAgain = true
+            return
+        }
+        // Don't fight the user: wait while a menu is open or a mouse button is down.
+        if MenuBarGeometry.isMenuOpen() || CGEventSource.buttonState(.combinedSessionState, button: .left) {
+            scheduleArrange(after: 2)
+            return
+        }
+        isArranging = true
+        defer {
+            isArranging = false
+            if arrangeAgain {
+                arrangeAgain = false
+                scheduleArrange()
+            }
+        }
+
+        let current = await scan()
+        knownKeys = Set(current.map(\.key))
+        let moves = plan(for: current)
+        guard !moves.isEmpty else { return }
+        log.notice("arranging: \(moves.count) move(s)")
+
+        let wasRevealed = menuBar.visibility.isRevealed
+        menuBar.reveal(armAutoHide: false)
+        try? await Task.sleep(for: .milliseconds(350))
+
+        for move in moves {
+            guard let divider = menuBar.dividerFrame(),
+                  let from = AX.frame(of: move.item.element),
+                  from.minX >= 0
+            else { continue }
+            let target = CGPoint(x: move.show ? divider.maxX + 3 : divider.minX - 3, y: from.midY)
+            let start = CGPoint(x: from.midX, y: from.midY)
+            await Task.detached(priority: .userInitiated) {
+                IconMover.drag(from: start, to: target)
+            }.value
+            try? await Task.sleep(for: .milliseconds(150))
+        }
+
+        if wasRevealed {
+            menuBar.reveal()
+        } else {
+            menuBar.collapse()
+        }
+        try? await Task.sleep(for: .milliseconds(300))
+        await scan()
+    }
+
+    /// Works out which icons need to cross the divider.
+    private func plan(for items: [MenuBarItem]) -> [Move] {
+        guard let perch = menuBar.perchFrame(), let screen = menuBar.screen else { return [] }
+        let inBar = items.filter { $0.isInMenuBar }
+        let movable = inBar.filter { !Self.unmovableIdentifiers.contains($0.identifier ?? "") }
+
+        // Room between the notch (or the middle of the screen, where app menus
+        // can reach on screens without one) and the bird.
+        let leftBound = screen.auxiliaryTopRightArea?.minX ?? screen.frame.midX
+        let reserved = inBar
+            .filter { Self.unmovableIdentifiers.contains($0.identifier ?? "") && $0.section == .shown }
+            .reduce(0) { $0 + $1.frame.width }
+        var room = perch.minX - leftBound - reserved - 24
+
+        var wantShown = Set<String>()
+        for item in movable where priority(of: item) == .always {
+            wantShown.insert(item.key)
+            room -= item.frame.width
+        }
+        // Auto icons closest to the bird get the room first.
+        let autos = movable
+            .filter { priority(of: $0) == .auto }
+            .sorted { $0.frame.minX > $1.frame.minX }
+        for item in autos where item.frame.width <= room {
+            wantShown.insert(item.key)
+            room -= item.frame.width
+        }
+
+        return movable.compactMap { item in
+            let shouldShow = wantShown.contains(item.key)
+            let isShown = item.section == .shown
+            return shouldShow == isShown ? nil : Move(item: item, show: shouldShow)
+        }
+    }
+
+    // MARK: - Triggers
+
+    private func observeTriggers() {
+        menuBar.onReady = { [weak self] in self?.scheduleArrange(after: 1) }
+
+        preferences.$priorities
+            .dropFirst()
+            .sink { [weak self] _ in self?.scheduleArrange() }
+            .store(in: &cancellables)
+
+        let center = NotificationCenter.default
+        observers.append(center.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.scheduleArrange(after: 1.5) }
+        })
+
+        let workspace = NSWorkspace.shared.notificationCenter
+        observers.append(workspace.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.scheduleArrange(after: 3) }
+        })
+        // A newly opened app adds its icon on the far left (the hidden side).
+        // Arrange so an Auto icon gets shown if there's room.
+        for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
+            observers.append(workspace.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.scheduleArrange(after: 3) }
+            })
+        }
+    }
+}

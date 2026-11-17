@@ -10,7 +10,6 @@ final class AutoRehider {
     private var delayTimer: Timer?
     private var retryTimer: Timer?
     private var clickMonitor: Any?
-    private var appSwitchObserver: NSObjectProtocol?
     private var isArmed = false
 
     init(preferences: Preferences, rehide: @escaping () -> Void) {
@@ -40,14 +39,6 @@ final class AutoRehider {
                 }
             }
         }
-
-        if preferences.rehideOnAppSwitch {
-            appSwitchObserver = NSWorkspace.shared.notificationCenter.addObserver(
-                forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
-            ) { [weak self] _ in
-                MainActor.assumeIsolated { self?.attempt() }
-            }
-        }
     }
 
     func disarm() {
@@ -59,10 +50,6 @@ final class AutoRehider {
         if let clickMonitor {
             NSEvent.removeMonitor(clickMonitor)
             self.clickMonitor = nil
-        }
-        if let appSwitchObserver {
-            NSWorkspace.shared.notificationCenter.removeObserver(appSwitchObserver)
-            self.appSwitchObserver = nil
         }
     }
 

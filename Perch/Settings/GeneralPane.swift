@@ -10,58 +10,53 @@ struct GeneralPane: View {
 
     var body: some View {
         Form {
-            Section("Startup") {
-                Toggle("Open Perch when you log in", isOn: Binding(
-                    get: { launchAtLogin },
-                    set: setLaunchAtLogin
-                ))
+            Section {
+                Toggle("Open Perch when you log in", isOn: Binding(get: { launchAtLogin }, set: setLaunchAtLogin))
                 if needsApproval {
-                    HStack {
-                        Text("macOS needs your OK in Login Items before this works.")
-                            .foregroundStyle(.secondary)
-                        Spacer()
+                    LabeledContent("macOS needs your OK in Login Items") {
                         Button("Open Login Items") { LaunchAtLogin.openLoginItemsSettings() }
                     }
                 }
                 if let loginError {
-                    Text(loginError)
-                        .font(.callout)
-                        .foregroundStyle(.red)
+                    Text(loginError).font(.callout).foregroundStyle(.red)
                 }
-            }
-
-            Section("Menu bar icon") {
-                IconStylePicker(selection: $preferences.iconStyle)
-            }
-
-            Section("Clicking the bird") {
-                Picker("Click", selection: $preferences.clickAction) {
-                    ForEach(ClickAction.allCases) { action in
-                        Text(action.title).tag(action)
+                Picker("Menu bar icon", selection: $preferences.iconStyle) {
+                    ForEach(PerchIconStyle.allCases) { style in
+                        Label(style.title, systemImage: style.symbolName(revealed: false)).tag(style)
                     }
                 }
-                LabeledContent("Option-click", value: preferences.clickAction == .openPanel
-                    ? ClickAction.revealInBar.title
-                    : ClickAction.openPanel.title)
-                LabeledContent("Right-click", value: "Perch menu")
             }
 
-            Section("Permissions") {
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Accessibility")
-                        Text("Lets Perch list your menu bar icons and open them for you.")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
+            Section {
+                Toggle("Hide icons again automatically", isOn: $preferences.autoRehideEnabled)
+                if preferences.autoRehideEnabled {
+                    LabeledContent("After") {
+                        HStack {
+                            Slider(value: $preferences.rehideDelay, in: 5...60)
+                                .frame(minWidth: 140)
+                            Text("\(Int(preferences.rehideDelay.rounded())) s")
+                                .monospacedDigit()
+                                .frame(width: 36, alignment: .trailing)
+                        }
                     }
-                    Spacer()
+                    Toggle("Also when I click outside the menu bar", isOn: $preferences.rehideOnClickOutside)
+                }
+            } footer: {
+                Text("Click Perch's icon to show or hide icons. Perch waits while a menu is open.")
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                LabeledContent("Accessibility") {
                     if permissions.hasAccessibility {
-                        Label("Allowed", systemImage: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
+                        Label("Allowed", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
                     } else {
                         Button("Allow…") { permissions.requestAccessibility() }
                     }
                 }
+            } footer: {
+                Text("Lets Perch see and move your menu bar icons.")
+                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
@@ -84,42 +79,5 @@ struct GeneralPane: View {
     private func refreshLoginState() {
         launchAtLogin = LaunchAtLogin.isEnabled || LaunchAtLogin.needsApproval
         needsApproval = LaunchAtLogin.needsApproval
-    }
-}
-
-private struct IconStylePicker: View {
-    @Binding var selection: PerchIconStyle
-
-    var body: some View {
-        HStack(spacing: 12) {
-            ForEach(PerchIconStyle.allCases) { style in
-                Button {
-                    selection = style
-                } label: {
-                    VStack(spacing: 8) {
-                        Image(systemName: style.symbolName(revealed: false))
-                            .font(.system(size: 18, weight: .medium))
-                            .frame(height: 24)
-                        Text(style.title)
-                            .font(.callout)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(selection == style ? Color.accentColor.opacity(0.15) : Color.primary.opacity(0.04))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .strokeBorder(selection == style ? Color.accentColor : Color.primary.opacity(0.1),
-                                          lineWidth: selection == style ? 2 : 1)
-                    )
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(selection == style ? .isSelected : [])
-            }
-        }
-        .padding(.vertical, 4)
     }
 }

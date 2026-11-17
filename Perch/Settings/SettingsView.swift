@@ -2,9 +2,9 @@ import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject var navigation: SettingsNavigation
-    @ObservedObject var preferences: Preferences
-    @ObservedObject var permissions: Permissions
-    @ObservedObject var menuBar: MenuBarController
+    let preferences: Preferences
+    let permissions: Permissions
+    let engine: LayoutEngine
 
     var body: some View {
         NavigationSplitView {
@@ -13,7 +13,7 @@ struct SettingsView: View {
                     Label(pane.title, systemImage: pane.symbol)
                 }
             }
-            .navigationSplitViewColumnWidth(min: 170, ideal: 190, max: 240)
+            .navigationSplitViewColumnWidth(min: 160, ideal: 170, max: 220)
         } detail: {
             detail(for: navigation.pane ?? .general)
                 .navigationTitle((navigation.pane ?? .general).title)
@@ -24,9 +24,27 @@ struct SettingsView: View {
     private func detail(for pane: SettingsPane) -> some View {
         switch pane {
         case .general: GeneralPane(preferences: preferences, permissions: permissions)
-        case .sections: SectionsPane(preferences: preferences, menuBar: menuBar)
-        case .autoHide: AutoHidePane(preferences: preferences)
+        case .icons: IconsPane(engine: engine, preferences: preferences, permissions: permissions)
         case .about: AboutPane()
         }
+    }
+}
+
+struct IconsPane: View {
+    let engine: LayoutEngine
+    let preferences: Preferences
+    let permissions: Permissions
+
+    var body: some View {
+        Form {
+            Section {
+                ArrangeList(engine: engine, preferences: preferences, permissions: permissions)
+            } footer: {
+                Text("**Always** stays in the menu bar. **Auto** stays when there's room and hides when there isn't. **Hide** shows when you click Perch's icon.")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .onAppear { engine.refresh() }
     }
 }
