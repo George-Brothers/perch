@@ -27,9 +27,11 @@ final class LayoutEngine: ObservableObject {
     /// they move or you change a priority, so a stuck icon doesn't make the
     /// bar flash on every trigger.
     private var stuck: [String: CGFloat] = [:]
-    /// Bumped on every priority change, so a pass that started under old
-    /// priorities doesn't mark icons stuck.
-    private var priorityGeneration = 0
+    /// Bumped on a priority change, display change, wake or unlock, so a pass
+    /// that started before one of those doesn't mark icons stuck.
+    private var stuckGeneration = 0
+    /// The display layout at the last display-change trigger.
+    private var lastScreenFrames: [CGRect] = NSScreen.screens.map(\.frame)
 
     /// Apple's in-use indicator (the orange mic pill) can't be moved.
     private static let unmovableIdentifiers: Set<String> = ["com.apple.menuextra.audiovideo"]
@@ -132,7 +134,7 @@ final class LayoutEngine: ObservableObject {
         guard !moves.isEmpty else { return }
         log.notice("arranging: \(moves.count) move(s)")
 
-        let generation = priorityGeneration
+        let generation = stuckGeneration
         let wasRevealed = menuBar.visibility.isRevealed
         menuBar.reveal(armAutoHide: false)
         menuBar.isBusy = true
@@ -172,7 +174,7 @@ final class LayoutEngine: ObservableObject {
 
         // Only judge the moves if the bar is in a known state and your
         // priorities didn't change while they ran.
-        guard menuBar.dividerFrame() != nil, generation == priorityGeneration else { return }
+        guard menuBar.dividerFrame() != nil, generation == stuckGeneration else { return }
         for move in attempted {
             guard let now = after.first(where: { $0.key == move.item.key }) else { continue }
             if (now.section == .shown) != move.show {
@@ -246,6 +248,7 @@ final class LayoutEngine: ObservableObject {
 
     /// After a display change, wake or unlock, give stuck icons another try.
     private func retry(after delay: TimeInterval) {
+        stuckGeneration += 1
         stuck.removeAll()
         scheduleArrange(after: delay)
     }
@@ -256,7 +259,7 @@ final class LayoutEngine: ObservableObject {
         preferences.$priorities
             .dropFirst()
             .sink { [weak self] _ in
-                self?.priorityGeneration += 1
+                self?.stuckGeneration += 1
                 self?.stuck.removeAll()
                 self?.scheduleArrange()
             }
@@ -277,7 +280,18 @@ final class LayoutEngine: ObservableObject {
         observers.append(center.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.retry(after: 1.5) }
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                // This fires for small things too (the Dock, say). Only retry
+                // stuck icons when the displays themselves changed.
+                let frames = NSScreen.screens.map(\.frame)
+                if frames != self.lastScreenFrames {
+                    self.lastScreenFrames = frames
+                    self.retry(after: 1.5)
+                } else {
+                    self.scheduleArrange(after: 1.5)
+                }
+            }
         })
 
         observers.append(DistributedNotificationCenter.default().addObserver(
