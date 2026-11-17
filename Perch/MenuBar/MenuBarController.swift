@@ -57,6 +57,9 @@ final class MenuBarController: NSObject, ObservableObject {
     private var rehider: AutoRehider!
     private var cancellables = Set<AnyCancellable>()
     private var placementAttempts = 0
+    private var hasReset = false
+    /// While Perch moves icons it shows and hides the bar itself; clicks wait.
+    var isBusy = false
 
     init(preferences: Preferences) {
         self.preferences = preferences
@@ -72,6 +75,7 @@ final class MenuBarController: NSObject, ObservableObject {
     // MARK: - Showing and hiding
 
     func toggle() {
+        guard !isBusy else { return }
         visibility.isRevealed ? collapse() : reveal()
     }
 
@@ -85,9 +89,17 @@ final class MenuBarController: NSObject, ObservableObject {
         rehider.disarm()
         guard perchIsRightOfDivider() else {
             // The bird ended up on the hidden side, so hiding would hide Perch
-            // itself. Put Perch back next to Control Center instead.
-            log.notice("Perch's items were out of order; resetting their positions")
-            resetPositions()
+            // itself. Put Perch back next to Control Center, once. If macOS
+            // still puts it on the wrong side, stay revealed rather than loop.
+            if hasReset {
+                log.error("Perch's items are still out of order; staying revealed")
+                visibility = .revealed
+                apply()
+            } else {
+                log.notice("Perch's items were out of order; resetting their positions")
+                hasReset = true
+                resetPositions()
+            }
             return
         }
         visibility = .collapsed
@@ -116,6 +128,7 @@ final class MenuBarController: NSObject, ObservableObject {
 
     /// Puts Perch's items back next to Control Center, in the right order.
     func resetPositions() {
+        guard !isBusy else { return }
         rehider.disarm()
         for item in [perchItem, hiddenDivider] {
             if let item { NSStatusBar.system.removeStatusItem(item) }
@@ -223,7 +236,8 @@ final class MenuBarController: NSObject, ObservableObject {
     /// frames are empty, so wait for real frames (up to about 3 seconds).
     private func collapseOncePlaced() {
         placementAttempts = 0
-        waitForPlacement()
+        // Always async, so `onReady` is wired up before it can fire.
+        DispatchQueue.main.async { [weak self] in self?.waitForPlacement() }
     }
 
     private func waitForPlacement() {
@@ -263,6 +277,7 @@ final class MenuBarController: NSObject, ObservableObject {
     }
 
     @objc private func dividerClicked(_ sender: NSStatusBarButton) {
+        guard !isBusy else { return }
         collapse()
     }
 

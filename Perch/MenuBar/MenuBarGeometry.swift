@@ -39,8 +39,11 @@ enum MenuBarGeometry {
         }
         let menuLevel = Int(CGWindowLevelForKey(.popUpMenuWindow))
         let barHeight = NSScreen.main.map(menuBarHeight(for:)) ?? 24
+        let ownPID = Int(ProcessInfo.processInfo.processIdentifier)
 
         for window in windows {
+            // Perch's own Arrange panel sits at menu level but isn't a menu.
+            if window[kCGWindowOwnerPID as String] as? Int == ownPID { continue }
             guard let layer = window[kCGWindowLayer as String] as? Int else { continue }
             if layer == menuLevel { return true }
             guard layer > 0, layer < 1000,

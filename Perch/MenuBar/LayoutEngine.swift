@@ -21,6 +21,12 @@ final class LayoutEngine: ObservableObject {
     private var observers: [NSObjectProtocol] = []
     private var pendingArrange: DispatchWorkItem?
     private var arrangeAgain = false
+    /// How many times in a row a pass waited for a menu or the mouse.
+    private var deferrals = 0
+    /// Icons that didn't move when asked, with where they were. Skipped until
+    /// they move or you change a priority, so a stuck icon doesn't make the
+    /// bar flash on every trigger.
+    private var stuck: [String: CGFloat] = [:]
 
     /// Apple's in-use indicator (the orange mic pill) can't be moved.
     private static let unmovableIdentifiers: Set<String> = ["com.apple.menuextra.audiovideo"]
@@ -93,14 +99,20 @@ final class LayoutEngine: ObservableObject {
             arrangeAgain = true
             return
         }
-        // Don't fight the user: wait while a menu is open or a mouse button is down.
-        if MenuBarGeometry.isMenuOpen() || CGEventSource.buttonState(.combinedSessionState, button: .left) {
-            scheduleArrange(after: 2)
+        // Nothing can be moved behind the lock screen; unlocking triggers a pass.
+        if Self.screenIsLocked() { return }
+        // Don't fight the user: wait while a menu is open or a mouse button is
+        // down. Give up after a few tries; the next trigger tries again.
+        if Self.userIsBusy() {
+            deferrals += 1
+            if deferrals <= 5 { scheduleArrange(after: 2) } else { deferrals = 0 }
             return
         }
+        deferrals = 0
         isArranging = true
         defer {
             isArranging = false
+            menuBar.isBusy = false
             if arrangeAgain {
                 arrangeAgain = false
                 scheduleArrange()
@@ -114,13 +126,21 @@ final class LayoutEngine: ObservableObject {
 
         let wasRevealed = menuBar.visibility.isRevealed
         menuBar.reveal(armAutoHide: false)
+        menuBar.isBusy = true
         try? await Task.sleep(for: .milliseconds(350))
 
+        var attempted: [Move] = []
         for move in moves {
+            // You started using the mouse or a menu: stop and try again later.
+            if Self.userIsBusy() {
+                arrangeAgain = true
+                break
+            }
             guard let divider = menuBar.dividerFrame(),
                   let from = AX.frame(of: move.item.element),
                   from.minX >= 0
             else { continue }
+            attempted.append(move)
             let target = CGPoint(x: move.show ? divider.maxX + 3 : divider.minX - 3, y: from.midY)
             let start = CGPoint(x: from.midX, y: from.midY)
             await Task.detached(priority: .userInitiated) {
@@ -129,20 +149,45 @@ final class LayoutEngine: ObservableObject {
             try? await Task.sleep(for: .milliseconds(150))
         }
 
+        menuBar.isBusy = false
         if wasRevealed {
             menuBar.reveal()
         } else {
             menuBar.collapse()
         }
         try? await Task.sleep(for: .milliseconds(300))
-        await scan()
+        let after = await scan()
+
+        for move in attempted {
+            guard let now = after.first(where: { $0.key == move.item.key }) else { continue }
+            if (now.section == .shown) != move.show {
+                log.notice("\(move.item.displayName, privacy: .public) didn't move; skipping it for now")
+                stuck[move.item.key] = now.frame.minX
+            }
+        }
+    }
+
+    private static func screenIsLocked() -> Bool {
+        let session = CGSessionCopyCurrentDictionary() as? [String: Any]
+        return session?["CGSSessionScreenIsLocked"] as? Bool ?? false
+    }
+
+    /// A real (not synthetic) mouse button is down, or a menu is open.
+    private static func userIsBusy() -> Bool {
+        CGEventSource.buttonState(.hidSystemState, button: .left)
+            || CGEventSource.buttonState(.hidSystemState, button: .right)
+            || MenuBarGeometry.isMenuOpen()
     }
 
     /// Works out which icons need to cross the divider.
     private func plan(for items: [MenuBarItem]) -> [Move] {
         guard let perch = menuBar.perchFrame(), let screen = menuBar.screen else { return [] }
         let inBar = items.filter { $0.isInMenuBar }
-        let movable = inBar.filter { !Self.unmovableIdentifiers.contains($0.identifier ?? "") }
+        let movable = inBar.filter { item in
+            if Self.unmovableIdentifiers.contains(item.identifier ?? "") { return false }
+            if let x = stuck[item.key], abs(x - item.frame.minX) < 1 { return false }
+            return true
+        }
 
         // Room between the notch (or the middle of the screen, where app menus
         // can reach on screens without one) and the bird.
@@ -155,7 +200,8 @@ final class LayoutEngine: ObservableObject {
         var wantShown = Set<String>()
         for item in movable where priority(of: item) == .always {
             wantShown.insert(item.key)
-            room -= item.frame.width
+            // Icons right of the bird don't use the room left of it.
+            if item.frame.minX < perch.minX { room -= item.frame.width }
         }
         // Auto icons closest to the bird get the room first.
         let autos = movable
@@ -166,11 +212,16 @@ final class LayoutEngine: ObservableObject {
             room -= item.frame.width
         }
 
-        return movable.compactMap { item in
+        let moves = movable.compactMap { item -> Move? in
             let shouldShow = wantShown.contains(item.key)
             let isShown = item.section == .shown
             return shouldShow == isShown ? nil : Move(item: item, show: shouldShow)
         }
+        // Hides first, to make room. Then shows, nearest the divider first, so
+        // each one pulls the next hidden icon out from behind the notch.
+        let hides = moves.filter { !$0.show }
+        let shows = moves.filter(\.show).sorted { $0.item.frame.minX > $1.item.frame.minX }
+        return hides + shows
     }
 
     // MARK: - Triggers
@@ -180,12 +231,32 @@ final class LayoutEngine: ObservableObject {
 
         preferences.$priorities
             .dropFirst()
-            .sink { [weak self] _ in self?.scheduleArrange() }
+            .sink { [weak self] _ in
+                self?.stuck.removeAll()
+                self?.scheduleArrange()
+            }
+            .store(in: &cancellables)
+
+        // Accessibility granted after launch: list the icons and arrange them.
+        permissions.$hasAccessibility
+            .removeDuplicates()
+            .dropFirst()
+            .filter { $0 }
+            .sink { [weak self] _ in
+                self?.refresh()
+                self?.scheduleArrange(after: 1)
+            }
             .store(in: &cancellables)
 
         let center = NotificationCenter.default
         observers.append(center.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.scheduleArrange(after: 1.5) }
+        })
+
+        observers.append(DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name("com.apple.screenIsUnlocked"), object: nil, queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.scheduleArrange(after: 1.5) }
         })

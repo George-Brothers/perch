@@ -18,10 +18,13 @@ enum IconMover {
             event.post(tap: .cgSessionEventTap)
         }
 
+        // Detach the physical mouse so moving it can't bend the drag.
+        CGAssociateMouseAndMouseCursorPosition(0)
         CGDisplayHideCursor(CGMainDisplayID())
         defer {
             if let original { CGWarpMouseCursorPosition(original) }
             CGDisplayShowCursor(CGMainDisplayID())
+            CGAssociateMouseAndMouseCursorPosition(1)
         }
 
         post(.leftMouseDown, start)
