@@ -109,6 +109,7 @@ final class MenuBarController: NSObject, ObservableObject {
     /// Opens another app's icon from the Arrange list. Hidden icons are revealed
     /// first, so their menu opens in the right place.
     func open(_ item: MenuBarItem) {
+        guard !isBusy else { return }
         let needsReveal = item.section == .hidden && !visibility.isRevealed
         if needsReveal { reveal() }
         DispatchQueue.main.asyncAfter(deadline: .now() + (needsReveal ? 0.3 : 0.05)) {

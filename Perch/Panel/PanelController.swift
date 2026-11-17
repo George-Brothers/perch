@@ -32,6 +32,7 @@ final class PanelController {
         position(panel)
         panel.orderFrontRegardless()
         panel.makeKey()
+        MenuBarGeometry.ignoredWindowNumber = panel.windowNumber
         installMonitors()
     }
 

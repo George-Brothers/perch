@@ -27,6 +27,9 @@ final class LayoutEngine: ObservableObject {
     /// they move or you change a priority, so a stuck icon doesn't make the
     /// bar flash on every trigger.
     private var stuck: [String: CGFloat] = [:]
+    /// Bumped on every priority change, so a pass that started under old
+    /// priorities doesn't mark icons stuck.
+    private var priorityGeneration = 0
 
     /// Apple's in-use indicator (the orange mic pill) can't be moved.
     private static let unmovableIdentifiers: Set<String> = ["com.apple.menuextra.audiovideo"]
@@ -105,7 +108,12 @@ final class LayoutEngine: ObservableObject {
         // down. Give up after a few tries; the next trigger tries again.
         if Self.userIsBusy() {
             deferrals += 1
-            if deferrals <= 5 { scheduleArrange(after: 2) } else { deferrals = 0 }
+            if deferrals <= 5 {
+                scheduleArrange(after: 2)
+            } else {
+                log.notice("a menu stayed open; skipping this pass")
+                deferrals = 0
+            }
             return
         }
         deferrals = 0
@@ -124,6 +132,7 @@ final class LayoutEngine: ObservableObject {
         guard !moves.isEmpty else { return }
         log.notice("arranging: \(moves.count) move(s)")
 
+        let generation = priorityGeneration
         let wasRevealed = menuBar.visibility.isRevealed
         menuBar.reveal(armAutoHide: false)
         menuBar.isBusy = true
@@ -131,16 +140,19 @@ final class LayoutEngine: ObservableObject {
 
         var attempted: [Move] = []
         for move in moves {
-            // You started using the mouse or a menu: stop and try again later.
-            if Self.userIsBusy() {
+            // You started using the mouse or a menu, or locked the screen:
+            // stop and try again later.
+            if Self.userIsBusy() || Self.screenIsLocked() {
                 arrangeAgain = true
                 break
             }
+            // Counted even when it can't be dragged (off screen, say), so an
+            // icon Perch can't reach doesn't make the bar flash every time.
+            attempted.append(move)
             guard let divider = menuBar.dividerFrame(),
                   let from = AX.frame(of: move.item.element),
                   from.minX >= 0
             else { continue }
-            attempted.append(move)
             let target = CGPoint(x: move.show ? divider.maxX + 3 : divider.minX - 3, y: from.midY)
             let start = CGPoint(x: from.midX, y: from.midY)
             await Task.detached(priority: .userInitiated) {
@@ -158,6 +170,9 @@ final class LayoutEngine: ObservableObject {
         try? await Task.sleep(for: .milliseconds(300))
         let after = await scan()
 
+        // Only judge the moves if the bar is in a known state and your
+        // priorities didn't change while they ran.
+        guard menuBar.dividerFrame() != nil, generation == priorityGeneration else { return }
         for move in attempted {
             guard let now = after.first(where: { $0.key == move.item.key }) else { continue }
             if (now.section == .shown) != move.show {
@@ -192,8 +207,11 @@ final class LayoutEngine: ObservableObject {
         // Room between the notch (or the middle of the screen, where app menus
         // can reach on screens without one) and the bird.
         let leftBound = screen.auxiliaryTopRightArea?.minX ?? screen.frame.midX
+        // Icons Perch won't move (the mic indicator, stuck ones) that already
+        // sit between the divider and the bird take up room too.
+        let movableKeys = Set(movable.map(\.key))
         let reserved = inBar
-            .filter { Self.unmovableIdentifiers.contains($0.identifier ?? "") && $0.section == .shown }
+            .filter { !movableKeys.contains($0.key) && $0.section == .shown && $0.frame.minX < perch.minX }
             .reduce(0) { $0 + $1.frame.width }
         var room = perch.minX - leftBound - reserved - 24
 
@@ -226,12 +244,19 @@ final class LayoutEngine: ObservableObject {
 
     // MARK: - Triggers
 
+    /// After a display change, wake or unlock, give stuck icons another try.
+    private func retry(after delay: TimeInterval) {
+        stuck.removeAll()
+        scheduleArrange(after: delay)
+    }
+
     private func observeTriggers() {
         menuBar.onReady = { [weak self] in self?.scheduleArrange(after: 1) }
 
         preferences.$priorities
             .dropFirst()
             .sink { [weak self] _ in
+                self?.priorityGeneration += 1
                 self?.stuck.removeAll()
                 self?.scheduleArrange()
             }
@@ -252,20 +277,20 @@ final class LayoutEngine: ObservableObject {
         observers.append(center.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.scheduleArrange(after: 1.5) }
+            MainActor.assumeIsolated { self?.retry(after: 1.5) }
         })
 
         observers.append(DistributedNotificationCenter.default().addObserver(
             forName: NSNotification.Name("com.apple.screenIsUnlocked"), object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.scheduleArrange(after: 1.5) }
+            MainActor.assumeIsolated { self?.retry(after: 1.5) }
         })
 
         let workspace = NSWorkspace.shared.notificationCenter
         observers.append(workspace.addObserver(
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.scheduleArrange(after: 3) }
+            MainActor.assumeIsolated { self?.retry(after: 3) }
         })
         // A newly opened app adds its icon on the far left (the hidden side).
         // Arrange so an Auto icon gets shown if there's room.

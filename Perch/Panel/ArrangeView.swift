@@ -26,7 +26,8 @@ struct ArrangeList: View {
         } else {
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(arrangeable) { item in
-                    ItemRow(item: item, priority: binding(for: item), onOpen: onOpenItem)
+                    ItemRow(item: item, priority: binding(for: item),
+                            onOpen: engine.isArranging ? nil : onOpenItem)
                 }
                 if !turnedOff.isEmpty {
                     Text("macOS isn't showing \(turnedOff.map(\.displayName).joined(separator: ", ")). You can turn them on in System Settings → Menu Bar.")
