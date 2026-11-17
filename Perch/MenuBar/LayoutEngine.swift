@@ -21,7 +21,6 @@ final class LayoutEngine: ObservableObject {
     private var observers: [NSObjectProtocol] = []
     private var pendingArrange: DispatchWorkItem?
     private var arrangeAgain = false
-    private var knownKeys: Set<String> = []
 
     /// Apple's in-use indicator (the orange mic pill) can't be moved.
     private static let unmovableIdentifiers: Set<String> = ["com.apple.menuextra.audiovideo"]
@@ -109,7 +108,6 @@ final class LayoutEngine: ObservableObject {
         }
 
         let current = await scan()
-        knownKeys = Set(current.map(\.key))
         let moves = plan(for: current)
         guard !moves.isEmpty else { return }
         log.notice("arranging: \(moves.count) move(s)")
