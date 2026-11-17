@@ -36,7 +36,7 @@ Perch never polls the menu bar on a timer and never takes screenshots in the bac
 ### 3. Notch and screens
 - **Perch Bar:** a strip that drops below the menu bar and holds hidden icons.
 - **Notch rescue:** icons that would land behind the notch go to the Perch Bar automatically.
-- **Spacing presets:** Default, Small (about 2 more icons fit) and Tiny (about 4 more). Needs one log-out.
+- **Spacing and padding:** sliders for the gap between icons and the padding around each one, with presets Default, Small (about 2 more icons fit) and Tiny (about 4 more). Uses the system's own `NSStatusItemSpacing` and `NSStatusItemSelectionPadding` settings. System icons update right away; other apps' icons update after they relaunch or you log out, and Perch says so.
 - **Per-display layouts** that switch when you plug a monitor in or out.
 
 ### 4. Keyboard
@@ -69,8 +69,11 @@ Each trigger listens to a system notification, so none of them poll.
 - Whole layouts you can swap (School, Client work, Desk).
 - Switch by hotkey, automation, Focus mode or display setup.
 
-### 8. Groups
-- Several icons fold into one icon that opens a small dropdown, for example Drive, Dropbox and iCloud as one "Cloud" icon.
+### 8. Groups and custom icons
+- **Groups:** several icons fold into one icon that opens a small dropdown, for example Drive, Dropbox and iCloud as one "Cloud" icon.
+- **Custom icons:** replace any long or ugly item with a compact one you pick: an SF Symbol, an emoji, a short label, or the app's own icon. The real item moves to Hidden, and clicking your version opens its real menu.
+- Custom icons are static, so they cost nothing. They suit icons whose look doesn't matter. Items that show live data (such as Stats) lose that data when swapped, so for those Perch points you to the app's own compact setting instead.
+- **Not doing:** live shrunken copies of other apps' icons. That would mean screenshotting the menu bar every second.
 
 ### 9. Settings and polish
 - Settings tabs: General, Sections, Auto-Hide, Hotkeys, Automations, Profiles, Displays, Advanced, About.
@@ -93,9 +96,9 @@ Each trigger listens to a system notification, so none of them poll.
 1. App shell: the Perch icon, sections with dividers, hide and show, auto-rehide, settings window, launch at login.
 2. Icon detection and the dropdown layout panel.
 3. Rearranging, layout guard, new icon rule, backups.
-4. Perch Bar, notch rescue, spacing presets.
+4. Perch Bar, notch rescue, spacing and padding sliders.
 5. Quick Search, hotkeys, clean mode.
 6. Spotlight and Shortcuts (App Intents, `perch://` links).
 7. Automations, profiles, per-display layouts.
-8. Groups and spacers.
+8. Groups, custom icons and spacers.
 9. Release: GitHub release, Homebrew tap, README with screenshots.
