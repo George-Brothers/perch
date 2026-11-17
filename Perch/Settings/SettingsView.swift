@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var navigation: SettingsNavigation
     @ObservedObject var preferences: Preferences
+    @ObservedObject var permissions: Permissions
     @ObservedObject var menuBar: MenuBarController
 
     var body: some View {
@@ -22,7 +23,7 @@ struct SettingsView: View {
     @ViewBuilder
     private func detail(for pane: SettingsPane) -> some View {
         switch pane {
-        case .general: GeneralPane(preferences: preferences)
+        case .general: GeneralPane(preferences: preferences, permissions: permissions)
         case .sections: SectionsPane(preferences: preferences, menuBar: menuBar)
         case .autoHide: AutoHidePane(preferences: preferences)
         case .about: AboutPane()

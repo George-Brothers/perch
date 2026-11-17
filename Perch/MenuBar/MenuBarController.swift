@@ -52,6 +52,10 @@ final class MenuBarController: NSObject, ObservableObject {
     @Published private(set) var visibility: Visibility = .showingAll
 
     var openSettings: ((SettingsPane?) -> Void)?
+    /// Opens or closes the Perch panel under the bird.
+    var togglePanel: ((NSStatusBarButton?) -> Void)?
+
+    var perchButton: NSStatusBarButton? { perchItem.button }
 
     private let preferences: Preferences
     private var perchItem: NSStatusItem!
@@ -123,6 +127,33 @@ final class MenuBarController: NSObject, ObservableObject {
         layoutProblem = false
         visibility = .collapsed
         apply()
+    }
+
+    /// The left edges of the dividers, in screen coordinates. Items whose right
+    /// edge sits at or left of an edge belong to that divider's section.
+    func dividerEdges() -> (hidden: CGFloat?, archived: CGFloat?) {
+        let hidden = frame(of: hiddenDivider)?.minX
+        let archived = preferences.archivedSectionEnabled ? frame(of: archivedDivider)?.minX : nil
+        return (hidden, archived)
+    }
+
+    /// Opens another app's icon from the panel. Hidden icons are revealed first,
+    /// so their menu opens in the right place.
+    func open(_ item: MenuBarItem) {
+        var needsLayout = false
+        switch item.section {
+        case .hidden where visibility == .collapsed:
+            reveal(.showingHidden)
+            needsLayout = true
+        case .archived where visibility != .showingAll:
+            reveal(.showingAll)
+            needsLayout = true
+        default:
+            break
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + (needsLayout ? 0.3 : 0.05)) {
+            ItemOpener.open(item)
+        }
     }
 
     /// Puts Perch's items back at the far left of the status area, in the right order.
@@ -271,7 +302,13 @@ final class MenuBarController: NSObject, ObservableObject {
             showMenu()
             return
         }
-        toggle(showArchived: event?.modifierFlags.contains(.option) == true)
+        let optionHeld = event?.modifierFlags.contains(.option) == true
+        let wantsPanel = (preferences.clickAction == .openPanel) != optionHeld
+        if wantsPanel {
+            togglePanel?(perchItem.button)
+        } else {
+            toggle(showArchived: false)
+        }
     }
 
     @objc private func dividerClicked(_ sender: NSStatusBarButton) {
@@ -281,6 +318,7 @@ final class MenuBarController: NSObject, ObservableObject {
     private func showMenu() {
         let menu = NSMenu()
 
+        menu.addItem(withTitle: "Open Perch Panel", action: #selector(menuPanel), keyEquivalent: "").target = self
         let toggleTitle = visibility.isRevealed ? "Hide Icons" : "Show Hidden Icons"
         menu.addItem(withTitle: toggleTitle, action: #selector(menuToggle), keyEquivalent: "").target = self
         if preferences.archivedSectionEnabled, visibility != .showingAll {
@@ -297,6 +335,7 @@ final class MenuBarController: NSObject, ObservableObject {
         perchItem.menu = nil
     }
 
+    @objc private func menuPanel() { togglePanel?(perchItem.button) }
     @objc private func menuToggle() { toggle(showArchived: false) }
     @objc private func menuShowAll() { reveal(.showingAll) }
     @objc private func menuSettings() { openSettings?(nil) }

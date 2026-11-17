@@ -2,6 +2,7 @@ import SwiftUI
 
 struct GeneralPane: View {
     @ObservedObject var preferences: Preferences
+    @ObservedObject var permissions: Permissions
 
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
     @State private var needsApproval = LaunchAtLogin.needsApproval
@@ -33,16 +34,41 @@ struct GeneralPane: View {
                 IconStylePicker(selection: $preferences.iconStyle)
             }
 
-            Section("Clicking the Perch icon") {
-                LabeledContent("Click", value: "Show or hide your hidden icons")
-                LabeledContent("Option-click", value: preferences.archivedSectionEnabled
-                    ? "Also show archived icons"
-                    : "Also show archived icons (turn on Archived in Sections)")
-                LabeledContent("Right-click", value: "Open the Perch menu")
+            Section("Clicking the bird") {
+                Picker("Click", selection: $preferences.clickAction) {
+                    ForEach(ClickAction.allCases) { action in
+                        Text(action.title).tag(action)
+                    }
+                }
+                LabeledContent("Option-click", value: preferences.clickAction == .openPanel
+                    ? ClickAction.revealInBar.title
+                    : ClickAction.openPanel.title)
+                LabeledContent("Right-click", value: "Perch menu")
+            }
+
+            Section("Permissions") {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Accessibility")
+                        Text("Lets Perch list your menu bar icons and open them for you.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if permissions.hasAccessibility {
+                        Label("Allowed", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                    } else {
+                        Button("Allow…") { permissions.requestAccessibility() }
+                    }
+                }
             }
         }
         .formStyle(.grouped)
-        .onAppear(perform: refreshLoginState)
+        .onAppear {
+            refreshLoginState()
+            permissions.refresh()
+        }
     }
 
     private func setLaunchAtLogin(_ enabled: Bool) {

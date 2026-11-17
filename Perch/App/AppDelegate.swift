@@ -6,6 +6,7 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var menuBar: MenuBarController!
     private var settings: SettingsWindowController!
+    private var panel: PanelController!
 
     static func main() {
         let app = NSApplication.shared
@@ -19,14 +20,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let preferences = Preferences.shared
+        let permissions = Permissions.shared
         let menuBar = MenuBarController(preferences: preferences)
         self.menuBar = menuBar
 
         settings = SettingsWindowController { navigation in
-            AnyView(SettingsView(navigation: navigation, preferences: preferences, menuBar: menuBar))
+            AnyView(SettingsView(navigation: navigation, preferences: preferences,
+                                 permissions: permissions, menuBar: menuBar))
         }
         menuBar.openSettings = { [weak self] pane in
+            self?.panel.close()
             self?.settings.show(pane: pane)
+        }
+
+        let panelModel = PanelModel(permissions: permissions, menuBar: menuBar)
+        panel = PanelController(model: panelModel) { [weak self] in
+            AnyView(PanelView(
+                model: panelModel,
+                permissions: permissions,
+                menuBar: menuBar,
+                preferences: preferences,
+                onOpenItem: { item in
+                    self?.panel.close()
+                    menuBar.open(item)
+                },
+                onToggleBar: {
+                    self?.panel.close()
+                    menuBar.toggle(showArchived: false)
+                },
+                onOpenSettings: {
+                    self?.panel.close()
+                    self?.settings.show(pane: nil)
+                }
+            ))
+        }
+        menuBar.togglePanel = { [weak self] anchor in
+            self?.panel.toggle(anchor: anchor)
         }
 
         if !preferences.hasSeenWelcome {
