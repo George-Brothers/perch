@@ -26,22 +26,22 @@ enum PerchIconStyle: String, CaseIterable, Identifiable {
     }
 }
 
-/// How much an icon matters to you.
+/// Where you want an icon. Its order in the bar is its priority: when the bar
+/// runs out of room, the leftmost icons are hidden until there's room again.
 enum IconPriority: String, CaseIterable, Identifiable {
-    /// Always in the menu bar.
-    case always
-    /// In the menu bar when there's room, otherwise hidden.
-    case auto
-    /// Only shown when you click the bird.
-    case hide
+    /// In the menu bar.
+    case shown
+    /// Only shown when you show hidden icons.
+    case hidden
 
     var id: String { rawValue }
 
-    var title: String {
-        switch self {
-        case .always: "Always"
-        case .auto: "Auto"
-        case .hide: "Hide"
+    /// Reads values saved by earlier versions too ("always", "auto", "hide").
+    init?(stored: String) {
+        switch stored {
+        case "shown", "always", "auto": self = .shown
+        case "hidden", "hide": self = .hidden
+        default: return nil
         }
     }
 }
@@ -96,7 +96,7 @@ final class Preferences: ObservableObject {
         ])
         iconStyle = PerchIconStyle(rawValue: defaults.string(forKey: Key.iconStyle) ?? "") ?? .bird
         let stored = defaults.dictionary(forKey: Key.priorities) as? [String: String] ?? [:]
-        priorities = stored.compactMapValues(IconPriority.init(rawValue:))
+        priorities = stored.compactMapValues(IconPriority.init(stored:)).filter { $0.value == .hidden }
         autoRehideEnabled = defaults.bool(forKey: Key.autoRehideEnabled)
         rehideDelay = defaults.double(forKey: Key.rehideDelay)
         rehideOnClickOutside = defaults.bool(forKey: Key.rehideOnClickOutside)
@@ -104,11 +104,11 @@ final class Preferences: ObservableObject {
     }
 
     func priority(for key: String) -> IconPriority {
-        priorities[key] ?? .auto
+        priorities[key] ?? .shown
     }
 
     func setPriority(_ priority: IconPriority, for key: String) {
-        if priority == .auto {
+        if priority == .shown {
             priorities.removeValue(forKey: key)
         } else {
             priorities[key] = priority

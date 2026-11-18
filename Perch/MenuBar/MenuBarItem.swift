@@ -33,10 +33,15 @@ struct MenuBarItem: Identifiable {
     /// macOS places these itself and they come and go.
     var isLiveActivity: Bool { identifier?.hasSuffix(".liveActivity") == true }
 
-    /// Whether Perch can ⌘-drag this icon. The mic/camera indicator and Live
-    /// Activities are placed by macOS and won't move.
+    /// The clock and Control Center, which macOS keeps at the right end.
+    var isFixed: Bool {
+        identifier == "com.apple.menuextra.clock" || identifier == "com.apple.menuextra.controlcenter"
+    }
+
+    /// Whether Perch can ⌘-drag this icon. The mic/camera indicator, Live
+    /// Activities, the clock and Control Center are placed by macOS and won't move.
     var isMovable: Bool {
-        !isLiveActivity && identifier != "com.apple.menuextra.audiovideo"
+        !isFixed && !isLiveActivity && identifier != "com.apple.menuextra.audiovideo"
     }
 
     var displayName: String {
