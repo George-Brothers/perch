@@ -122,7 +122,7 @@ final class MenuBarController: NSObject, ObservableObject {
 
     /// True while the bar is out only for an icon opened from the drawer or
     /// search, so Perch hides it again when that icon's menu closes.
-    private var isTemporaryReveal = false
+    private(set) var isTemporaryReveal = false
 
     /// Opens a hidden icon picked from the drawer or search: shows the hidden icons just
     /// long enough for its menu, then hides them again when the menu closes.

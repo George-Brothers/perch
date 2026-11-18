@@ -50,12 +50,7 @@ struct IconsPane: View {
         }
         .formStyle(.grouped)
         .onAppear {
-            Task {
-                let items = await engine.rescan()
-                if preferences.drawerEnabled {
-                    await images.capture(items.filter { $0.section != .notShowing && images.needsCapture($0) })
-                }
-            }
+            Task { await images.refresh?() }
         }
     }
 }

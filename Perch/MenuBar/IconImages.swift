@@ -34,6 +34,22 @@ final class IconImages: ObservableObject {
 
     func image(for item: MenuBarItem) -> NSImage? { images[item.key] }
 
+    /// Rescans and pictures whatever needs it, following all of Perch's rules
+    /// (drawer on, permission, no menu open). Set by the app; Settings calls it.
+    var refresh: (() async -> Void)?
+
+    private var themeObserver: NSObjectProtocol?
+
+    init() {
+        // Light/Dark mode redraws every icon: retake all pictures next time
+        // they're on screen, keeping the old ones until then.
+        themeObserver = DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name("AppleInterfaceThemeChangedNotification"), object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.captured.removeAll() }
+        }
+    }
+
     func clear() {
         images = [:]
         captured = [:]
@@ -103,8 +119,8 @@ final class IconImages: ObservableObject {
             captured[key] = (now, widths[key] ?? image.size.width)
         }
         images = updated
-        // Judge from the new pictures: they show the bar as it looks now.
-        iconsAreLight = Self.averageLuminance(of: pictures.map(\.1)) > 0.6
+        // Judge from every picture, so one colorful new icon can't flip the look.
+        iconsAreLight = Self.averageLuminance(of: Array(updated.values)) > 0.6
     }
 
     /// Average brightness of the drawn (non-transparent) pixels, 0 to 1.

@@ -53,7 +53,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 images: images,
                 onOpenItem: { item in
                     self?.arrangePanel.close()
-                    self?.open(item)
+                    if self?.open(item) == false { NSSound.beep() }
                 },
                 onOpenSettings: {
                     self?.arrangePanel.close()
@@ -69,6 +69,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard preferences.drawerEnabled, permissions.hasScreenRecording,
                   !MenuBarGeometry.isMenuOpen() else { return }
             let items = await engine.rescan()
+            guard !MenuBarGeometry.isMenuOpen() else { return }
             await images.capture(items.filter { $0.section != .notShowing && images.needsCapture($0) })
         }
         menuBar.beforeFirstHide = captureVisible
@@ -78,19 +79,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .filter(\.isRevealed)
             .debounce(for: .milliseconds(400), scheduler: RunLoop.main)
             .sink { _ in
-                guard menuBar.visibility.isRevealed, !engine.isArranging else { return }
+                // Not while an icon opened from the drawer or search is showing its menu.
+                guard menuBar.visibility.isRevealed, !menuBar.isTemporaryReveal, !engine.isArranging else { return }
                 Task { await captureVisible() }
             }
             .store(in: &cancellables)
-        arrangePanel.onOpen = {
-            Task {
-                if preferences.drawerEnabled && permissions.hasScreenRecording {
-                    await captureVisible()
-                } else {
-                    _ = await engine.rescan()
-                }
+        images.refresh = {
+            if preferences.drawerEnabled && permissions.hasScreenRecording {
+                await captureVisible()
+            } else {
+                _ = await engine.rescan()
             }
         }
+        arrangePanel.onOpen = { Task { await images.refresh?() } }
         // Turning the drawer on (with permission already granted): show the
         // hidden icons for a moment so the drawer has pictures of them.
         preferences.$drawerEnabled
@@ -112,7 +113,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let drawer = DrawerController(engine: engine, images: images, preferences: preferences)
         self.drawer = drawer
-        drawer.onOpenItem = { item in menuBar.openTemporarily(item) }
+        drawer.onOpenItem = { item in
+            if !menuBar.openTemporarily(item) { NSSound.beep() }
+        }
         drawer.onOpenArrange = { [weak self] in self?.arrangePanel.open(anchor: menuBar.perchButton) }
         menuBar.toggleDrawer = { [weak self] in
             guard preferences.drawerEnabled, permissions.hasScreenRecording, permissions.hasAccessibility else {
@@ -128,7 +131,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         searchPanel = PanelController(model: engine) { [weak self] in
             AnyView(SearchView(model: searchModel, engine: engine) { item in
                 self?.searchPanel.close()
-                self?.open(item)
+                if self?.open(item) == false { NSSound.beep() }
             })
         }
         searchPanel.onOpen = {
@@ -209,11 +212,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         await engine.rescan().filter { $0.section != .notShowing }
     }
 
-    /// Opens the icon with this key. Returns false if it's gone.
-    func openIcon(key: String) async -> Bool {
-        guard let item = await icons().first(where: { $0.key == key }) else { return false }
-        return open(item)
+    /// Opens the icon with this key.
+    func openIcon(key: String) async -> OpenResult {
+        guard let item = await icons().first(where: { $0.key == key }) else { return .gone }
+        return open(item) ? .opened : .busy
     }
+
+    enum OpenResult { case opened, gone, busy }
 
     /// Opens an icon's menu. A hidden icon comes out just until its menu closes.
     /// False when Perch is busy arranging.

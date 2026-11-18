@@ -141,7 +141,8 @@ final class LayoutEngine: ObservableObject {
         log.notice("arranging: \(moves.count) move(s)")
 
         let generation = stuckGeneration
-        let wasRevealed = menuBar.visibility.isRevealed
+        // A bar that's out only for an opened icon goes back to hidden afterwards.
+        let wasRevealed = menuBar.visibility.isRevealed && !menuBar.isTemporaryReveal
         menuBar.reveal(armAutoHide: false)
         menuBar.isBusy = true
         try? await Task.sleep(for: .milliseconds(350))
