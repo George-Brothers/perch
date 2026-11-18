@@ -16,7 +16,7 @@ enum ItemOpener {
         // click if no menu came up.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
             guard !MenuBarGeometry.isMenuOpen(),
-                  let frame = AX.frame(of: item.element), frame.minX >= 0
+                  let frame = AX.frame(of: item.element), MenuBarGeometry.isOnScreen(frame)
             else { return }
             click(at: CGPoint(x: frame.midX, y: frame.midY))
         }

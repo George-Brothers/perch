@@ -39,8 +39,14 @@ struct FeaturesPane: View {
                     Text("Press it anywhere, type part of an icon's name, and press Return to open it.")
                 }
                 if preferences.searchEnabled {
-                    LabeledContent("Shortcut") {
-                        ShortcutRecorder(shortcut: $preferences.searchShortcut)
+                    LabeledContent {
+                        ShortcutRecorder(shortcut: $preferences.searchShortcut, recording: $preferences.isRecordingShortcut)
+                    } label: {
+                        Text("Shortcut")
+                        if preferences.searchShortcutTaken {
+                            Text("Another app already uses this shortcut. Pick a different one.")
+                                .foregroundStyle(.red)
+                        }
                     }
                 }
             }
@@ -72,7 +78,12 @@ struct FeaturesPane: View {
         } message: {
             Text("Perch will quit and reopen \(reopenList) so they use the new spacing. Save any work in them first.")
         }
-        .onAppear { permissions.refresh() }
+        .onAppear {
+            permissions.refresh()
+            // Settings stays alive between openings; drop an edit that was never applied.
+            appliedSpacing = MenuBarSpacing.current
+            spacing = Double(appliedSpacing)
+        }
         .sheet(isPresented: $explainingDrawer) {
             DrawerPermissionSheet(
                 onContinue: {
@@ -85,8 +96,9 @@ struct FeaturesPane: View {
         }
     }
 
+    /// The same apps `MenuBarSpacing.reopenMenuBarApps` reopens.
     private var reopenList: String {
-        let names = Set(engine.items.filter { $0.bundleID != "com.apple.controlcenter" }.map(\.displayName)).sorted()
+        let names = Set(MenuBarSpacing.appsToReopen(engine.items).compactMap(\.localizedName)).sorted()
         return (names + ["Control Center", "Perch"]).joined(separator: ", ")
     }
 
@@ -166,8 +178,9 @@ private struct SpacingPreview: View {
 /// Click, then press the shortcut you want. Escape cancels.
 private struct ShortcutRecorder: View {
     @Binding var shortcut: Shortcut
-    @State private var recording = false
+    @Binding var recording: Bool
     @State private var monitor: Any?
+    @State private var resignObserver: NSObjectProtocol?
 
     var body: some View {
         Button {
@@ -184,6 +197,12 @@ private struct ShortcutRecorder: View {
 
     private func start() {
         recording = true
+        // Clicking away from Settings stops recording.
+        resignObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didResignKeyNotification, object: NSApp.keyWindow, queue: .main
+        ) { _ in
+            MainActor.assumeIsolated { stop() }
+        }
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             if event.keyCode == 53 { // Escape
                 stop()
@@ -202,8 +221,10 @@ private struct ShortcutRecorder: View {
     }
 
     private func stop() {
-        recording = false
+        if recording { recording = false }
         if let monitor { NSEvent.removeMonitor(monitor) }
         monitor = nil
+        if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) }
+        resignObserver = nil
     }
 }

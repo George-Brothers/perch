@@ -22,8 +22,14 @@ enum MenuBarGeometry {
     /// but are not menus.
     private static let ignoredOwners: Set<String> = ["Window Server", "Dock", "Notification Center"]
 
-    /// Perch's Arrange panel, which sits at menu level but isn't a menu.
-    @MainActor static var ignoredWindowNumber: Int?
+    /// Perch's own panels (drawer, Arrange, search) sit at menu level but aren't menus.
+    @MainActor static var ignoredWindowNumbers: Set<Int> = []
+
+    /// Whether an icon's frame starts on some display, including displays to the
+    /// left of the main one (negative x). Hidden icons sit off every display.
+    static func isOnScreen(_ frame: CGRect) -> Bool {
+        NSScreen.screens.contains { $0.frame.minX <= frame.minX && frame.minX < $0.frame.maxX }
+    }
 
     /// Whether any app has a menu or menu bar panel open right now.
     /// Reads window levels and sizes only, so it needs no Screen Recording permission.
@@ -43,8 +49,8 @@ enum MenuBarGeometry {
         let menuLevel = Int(CGWindowLevelForKey(.popUpMenuWindow))
         let barHeight = NSScreen.main.map(menuBarHeight(for:)) ?? 24
         for window in windows {
-            // Perch's own Arrange panel sits at menu level but isn't a menu.
-            if let ignored = ignoredWindowNumber, window[kCGWindowNumber as String] as? Int == ignored { continue }
+            // Perch's own panels sit at menu level but aren't menus.
+            if let number = window[kCGWindowNumber as String] as? Int, ignoredWindowNumbers.contains(number) { continue }
             guard let layer = window[kCGWindowLayer as String] as? Int else { continue }
             if layer == menuLevel { return true }
             guard layer > 0, layer < 1000,

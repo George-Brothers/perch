@@ -43,8 +43,13 @@ struct Shortcut: Equatable {
         }
         if let number = functionKeys[Int(code)] { return "F\(number)" }
         // Ask the current keyboard layout what the key types.
-        guard let source = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue(),
-              let data = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData)
+        // Input methods such as Pinyin have no layout of their own; fall back to
+        // the keyboard underneath them.
+        let sources = [TISCopyCurrentKeyboardLayoutInputSource(), TISCopyCurrentASCIICapableKeyboardLayoutInputSource()]
+        guard let data = sources.lazy
+            .compactMap({ $0?.takeRetainedValue() })
+            .compactMap({ TISGetInputSourceProperty($0, kTISPropertyUnicodeKeyLayoutData) })
+            .first
         else { return "?" }
         let layout = unsafeBitCast(data, to: CFData.self)
         var deadKeys: UInt32 = 0

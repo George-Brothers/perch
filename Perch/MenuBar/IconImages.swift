@@ -29,7 +29,7 @@ final class IconImages: ObservableObject {
 
         let content: SCShareableContent
         do {
-            content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+            content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         } catch {
             log.error("couldn't list windows: \(error.localizedDescription, privacy: .public)")
             return
@@ -47,9 +47,12 @@ final class IconImages: ObservableObject {
             if let match { jobs.append((item.key, match)) }
         }
 
-        let scale = NSScreen.main?.backingScaleFactor ?? 2
         let captured = await withTaskGroup(of: (String, NSImage)?.self) { group in
             for job in jobs {
+                // SCWindow frames use a top-left origin; x matches NSScreen's.
+                let scale = NSScreen.screens
+                    .first { $0.frame.minX <= job.window.frame.midX && job.window.frame.midX < $0.frame.maxX }?
+                    .backingScaleFactor ?? 2
                 group.addTask {
                     let config = SCStreamConfiguration()
                     config.width = Int(job.window.frame.width * scale)

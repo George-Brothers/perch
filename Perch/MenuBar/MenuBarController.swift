@@ -88,12 +88,14 @@ final class MenuBarController: NSObject, ObservableObject {
     }
 
     func reveal(armAutoHide: Bool = true) {
+        stopMenuWatch()
         visibility = .revealed
         apply()
         if armAutoHide { rehider.arm() } else { rehider.disarm() }
     }
 
     func collapse() {
+        stopMenuWatch()
         rehider.disarm()
         guard perchIsRightOfDivider() else {
             // The bird ended up on the hidden side, so hiding would hide Perch
@@ -129,26 +131,33 @@ final class MenuBarController: NSObject, ObservableObject {
     /// long enough for its menu, then hides them again when the menu closes.
     func openTemporarily(_ item: MenuBarItem) {
         guard !isBusy else { return }
-        let wasRevealed = visibility.isRevealed
-        if !wasRevealed {
+        // Opening a second icon before the first one's menu closed: keep the
+        // bar out until this one's menu closes instead.
+        let watching = menuWatch != nil
+        stopMenuWatch()
+        let wasRevealed = visibility.isRevealed && !watching
+        if !visibility.isRevealed {
             visibility = .revealed
             apply()
             rehider.disarm()
         }
+        pendingOpen += 1
+        let request = pendingOpen
         // Its menu opens wherever the icon is, so wait until it's on screen.
         whenOnScreen(item, attempts: 20) { [weak self] in
-            guard let self else { return }
+            guard let self, self.pendingOpen == request, self.visibility.isRevealed else { return }
             ItemOpener.open(item)
             if !wasRevealed { self.collapseWhenMenuCloses() }
         }
     }
 
+    /// The latest `openTemporarily` request; older ones that are still waiting give up.
+    private var pendingOpen = 0
+
     /// Runs `action` once the icon has moved on screen, checking every 50 ms
     /// for up to `attempts` tries (then runs it anyway).
     private func whenOnScreen(_ item: MenuBarItem, attempts: Int, _ action: @escaping () -> Void) {
-        let onScreen = AX.frame(of: item.element).map { frame in
-            NSScreen.screens.contains { $0.frame.minX <= frame.minX && frame.minX < $0.frame.maxX }
-        } ?? false
+        let onScreen = AX.frame(of: item.element).map(MenuBarGeometry.isOnScreen) ?? false
         if onScreen || attempts <= 0 {
             // A moment more for the move to settle.
             Task { @MainActor in
@@ -164,9 +173,14 @@ final class MenuBarController: NSObject, ObservableObject {
 
     private var menuWatch: Timer?
 
+    private func stopMenuWatch() {
+        menuWatch?.invalidate()
+        menuWatch = nil
+    }
+
     /// Checks twice a second while the opened menu is up, and only then.
     private func collapseWhenMenuCloses() {
-        menuWatch?.invalidate()
+        stopMenuWatch()
         var checks = 0
         var sawMenu = false
         let timer = Timer(timeInterval: 0.4, repeats: true) { [weak self] timer in
@@ -177,8 +191,7 @@ final class MenuBarController: NSObject, ObservableObject {
                 sawMenu = sawMenu || open
                 // Done when the menu closed, or if none ever opened, or after 2 minutes.
                 if (!open && (sawMenu || checks >= 5)) || checks > 300 {
-                    timer.invalidate()
-                    self.menuWatch = nil
+                    self.stopMenuWatch()
                     if self.visibility.isRevealed, !self.isBusy { self.collapse() }
                 }
             }

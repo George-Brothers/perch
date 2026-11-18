@@ -13,6 +13,8 @@ final class DrawerController {
     private var outsideClickMonitor: Any?
     private var keyMonitor: Any?
     private var resizeObserver: NSObjectProtocol?
+    /// Bumped on every open, so a fade-out that finishes late doesn't hide a reopened drawer.
+    private var generation = 0
 
     /// Opens the icon's own menu. Set by the app.
     var onOpenItem: ((MenuBarItem) -> Void)?
@@ -34,9 +36,11 @@ final class DrawerController {
         self.anchor = anchor
         let panel = self.panel ?? makePanel()
         self.panel = panel
+        generation += 1
         position(panel)
         panel.alphaValue = 0
         panel.orderFrontRegardless()
+        MenuBarGeometry.ignoredWindowNumbers.insert(panel.windowNumber)
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.12
             panel.animator().alphaValue = 1
@@ -51,11 +55,15 @@ final class DrawerController {
     func close() {
         guard let panel, panel.isVisible else { return }
         removeMonitors()
+        let closing = generation
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.1
             panel.animator().alphaValue = 0
-        } completionHandler: {
-            MainActor.assumeIsolated { panel.orderOut(nil) }
+        } completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                guard self?.generation == closing else { return }
+                panel.orderOut(nil)
+            }
         }
     }
 
@@ -173,7 +181,7 @@ struct DrawerView: View {
         .padding(.vertical, 2)
         .background(.regularMaterial, in: Capsule(style: .continuous))
         .overlay(Capsule(style: .continuous).strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5))
-        .environment(\.colorScheme, images.iconsAreLight ? .dark : .light)
+        .modifier(MatchIconColors(images: images, active: hidden.contains { images.image(for: $0) != nil }))
         .fixedSize()
         .padding(1)
     }
@@ -189,6 +197,21 @@ struct DrawerView: View {
     }
 }
 
+/// Pictures of icons are drawn for the menu bar behind them, so give the drawer
+/// the same light or dark look. With no pictures yet, follow the system.
+struct MatchIconColors: ViewModifier {
+    @ObservedObject var images: IconImages
+    let active: Bool
+
+    func body(content: Content) -> some View {
+        if active {
+            content.environment(\.colorScheme, images.iconsAreLight ? .dark : .light)
+        } else {
+            content
+        }
+    }
+}
+
 private struct DrawerIcon: View {
     let item: MenuBarItem
     let image: NSImage?
@@ -199,8 +222,12 @@ private struct DrawerIcon: View {
         Button { onOpen(item) } label: {
             Group {
                 if let image {
+                    // Notched displays have a taller bar; keep the drawer slim anyway.
                     Image(nsImage: image)
+                        .resizable()
                         .interpolation(.high)
+                        .aspectRatio(contentMode: .fit)
+                        .frame(height: min(image.size.height, 24))
                 } else {
                     ItemIcon(item: item)
                         .frame(width: 18, height: 18)

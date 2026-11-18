@@ -35,13 +35,19 @@ enum MenuBarSpacing {
         CFPreferencesSynchronize(kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesCurrentHost)
     }
 
+    /// Apps with an icon in the menu bar, other than Perch and macOS's own.
+    static func appsToReopen(_ items: [MenuBarItem]) -> [NSRunningApplication] {
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        let system: Set<String> = ["com.apple.controlcenter", "com.apple.systemuiserver"]
+        let pids = Set(items.filter { $0.section != .notShowing }.map(\.pid)).filter { $0 != ownPID }
+        return pids.compactMap { NSRunningApplication(processIdentifier: $0) }
+            .filter { !system.contains($0.bundleIdentifier ?? "") }
+    }
+
     /// Quits and reopens each app that has a menu bar icon, plus Control
     /// Center, so they all draw with the new spacing. Perch reopens itself last.
     static func reopenMenuBarApps(_ items: [MenuBarItem]) {
-        let ownPID = ProcessInfo.processInfo.processIdentifier
-        let pids = Set(items.map(\.pid)).filter { $0 != ownPID }
-        let apps = pids.compactMap { NSRunningApplication(processIdentifier: $0) }
-            .filter { $0.bundleIdentifier != "com.apple.controlcenter" && $0.bundleIdentifier != "com.apple.systemuiserver" }
+        let apps = appsToReopen(items)
 
         Task {
             for app in apps {

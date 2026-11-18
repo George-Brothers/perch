@@ -81,6 +81,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             .store(in: &cancellables)
         arrangePanel.onOpen = { Task { await captureVisible() } }
+        // Turning the drawer on (with permission already granted): show the
+        // hidden icons for a moment so the drawer has pictures of them.
+        preferences.$drawerEnabled
+            .dropFirst()
+            .removeDuplicates()
+            .filter { $0 }
+            .sink { _ in
+                guard permissions.hasScreenRecording, !menuBar.isBusy, !engine.isArranging,
+                      !menuBar.visibility.isRevealed else { return }
+                Task {
+                    menuBar.reveal(armAutoHide: false)
+                    try? await Task.sleep(for: .milliseconds(400))
+                    await captureVisible()
+                    if menuBar.visibility.isRevealed, !menuBar.isBusy { menuBar.collapse() }
+                }
+            }
+            .store(in: &cancellables)
 
         let drawer = DrawerController(engine: engine, images: images, preferences: preferences)
         self.drawer = drawer
@@ -90,7 +107,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard preferences.drawerEnabled, permissions.hasScreenRecording, permissions.hasAccessibility else {
                 return false
             }
-            self?.arrangePanel.close()
+            self?.closePanels(except: .drawer)
             self?.drawer.toggle(anchor: menuBar.perchButton)
             return true
         }
@@ -112,9 +129,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             engine.refresh()
         }
         let openSearch = { [weak self] in
-            guard let self, permissions.hasAccessibility else { return }
-            self.drawer.close()
-            self.arrangePanel.close()
+            guard let self else { return }
+            // Without Accessibility there's nothing to search; show why instead.
+            guard permissions.hasAccessibility else {
+                self.closePanels(except: .arrange)
+                self.arrangePanel.open(anchor: menuBar.perchButton)
+                return
+            }
+            self.closePanels(except: .search)
             self.searchPanel.toggle(anchor: menuBar.perchButton)
         }
         menuBar.openSearch = openSearch
@@ -123,18 +145,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             preferences.searchEnabled ? preferences.searchShortcut.displayString : nil
         }
         hotKey = HotKey(action: openSearch)
-        Publishers.CombineLatest(preferences.$searchEnabled, preferences.$searchShortcut)
-            .sink { [weak self] enabled, shortcut in
-                self?.hotKey.register(enabled ? shortcut : nil)
+        Publishers.CombineLatest3(preferences.$searchEnabled, preferences.$searchShortcut, preferences.$isRecordingShortcut)
+            .sink { [weak self] enabled, shortcut, recording in
+                guard let self else { return }
+                let registered = self.hotKey.register(enabled && !recording ? shortcut : nil)
+                if !recording { preferences.searchShortcutTaken = enabled && !registered }
             }
             .store(in: &cancellables)
 
         menuBar.openSettings = { [weak self] pane in
-            self?.arrangePanel.close()
+            self?.closePanels(except: nil)
             self?.settings.show(pane: pane)
         }
         menuBar.openArrange = { [weak self] anchor in
-            self?.drawer.close()
+            self?.closePanels(except: .arrange)
             self?.arrangePanel.toggle(anchor: anchor)
         }
 
@@ -147,9 +171,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private enum Panel { case drawer, arrange, search }
+
+    /// Only one of Perch's panels is open at a time.
+    private func closePanels(except kept: Panel?) {
+        if kept != .drawer { drawer.close() }
+        if kept != .arrange { arrangePanel.close() }
+        if kept != .search { searchPanel.close() }
+    }
+
     // MARK: - Actions for Spotlight and Shortcuts
 
+    /// Opens the drawer, or shows hidden icons in the bar. Never hides them.
     func showHiddenIcons() {
+        if drawer.isOpen { return }
         if menuBar.toggleDrawer?() == true { return }
         menuBar.reveal()
     }

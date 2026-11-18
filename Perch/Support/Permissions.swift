@@ -54,7 +54,12 @@ final class Permissions: ObservableObject {
     /// Asks macOS for Screen Recording. macOS shows its prompt only the first
     /// time; after that the switch lives in System Settings, so open it there.
     func requestScreenRecording() {
-        if !CGRequestScreenCaptureAccess() {
+        // The first request shows macOS's prompt and returns false right away;
+        // opening System Settings then would cover the prompt.
+        let key = "askedForScreenRecording"
+        let askedBefore = UserDefaults.standard.bool(forKey: key)
+        UserDefaults.standard.set(true, forKey: key)
+        if !CGRequestScreenCaptureAccess(), askedBefore {
             openPrivacyPane("Privacy_ScreenCapture")
         }
         refresh()
@@ -71,7 +76,9 @@ final class Permissions: ObservableObject {
         let path = Bundle.main.bundlePath
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/bin/sh")
-        task.arguments = ["-c", "sleep 0.5; /usr/bin/open \"$0\"", path]
+        // Wait for this copy to quit (up to 5 s), then open a fresh one.
+        let pid = ProcessInfo.processInfo.processIdentifier
+        task.arguments = ["-c", "for i in $(seq 50); do kill -0 $1 2>/dev/null || break; sleep 0.1; done; /usr/bin/open -n \"$0\"", path, String(pid)]
         try? task.run()
         NSApp.terminate(nil)
     }
