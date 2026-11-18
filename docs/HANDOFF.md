@@ -23,7 +23,11 @@
 - Preferred position defaults: smaller = further right. Seeded Perch 100, divider 101.
 - Frames are empty right after creating a status item; valid ~0.5 s later.
 - Items behind the notch aren't drawn and can't be dragged. The drawer is the fix.
-- AXPress fails for Shottr and Wispr Flow; fallback is a synthetic click with the pointer put back.
+- AXPress opens Shottr and Wispr Flow's menus even when it reports an error. No synthetic clicks anywhere.
+- Icon order is `NSStatusItem Preferred Position <name>` in each app's defaults (sandboxed apps: their container plist). Roughly the distance from the right edge; the whole bar sorts by it. Apps read it at launch, so a move = write + restart. Control Center's items are in com.apple.controlcenter; it relaunches itself after SIGTERM.
+- ⌘-drag events posted to a pid (cursor untouched) don't move icons. Only a real pointer drag does, so Perch doesn't drag at all.
+- Removing a status item makes macOS forget its saved position, so Perch's items switch between two autosave names to move.
+- Stats takes about 3 s to put its icon back after a restart.
 - Each display draws its own copy of the status item windows.
 - AX hit test (`AXUIElementCopyElementAtPosition`) on empty menu bar space returns role AXMenuBar owned by the front app; app menus and icons return AXMenuBarItem. That's how Perch spots an empty-space click.
 - A collapsed divider is clamped to about 5,000 pt wide; its right edge is still where hidden icons end.

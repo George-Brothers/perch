@@ -73,7 +73,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             await images.capture(items.filter { $0.section != .notShowing && images.needsCapture($0) })
         }
         menuBar.beforeFirstHide = captureVisible
-        engine.whileRevealed = captureVisible
         menuBar.$visibility
             .removeDuplicates()
             .filter(\.isRevealed)
@@ -112,7 +111,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .sink { on in
                 // Turned off: forget the pictures.
                 guard on else { return images.clear() }
-                guard permissions.hasScreenRecording, !menuBar.isBusy, !engine.isArranging,
+                guard permissions.hasScreenRecording, !engine.isArranging,
                       !menuBar.visibility.isRevealed else { return }
                 Task {
                     menuBar.reveal(armAutoHide: false)
@@ -120,7 +119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     await captureVisible()
                     // The reveal also starts the usual capture; let it finish first.
                     await images.waitUntilIdle()
-                    if menuBar.visibility.isRevealed, !menuBar.isBusy { menuBar.collapse() }
+                    if menuBar.visibility.isRevealed { menuBar.collapse() }
                 }
             }
             .store(in: &cancellables)
@@ -206,9 +205,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if item.section == .hidden {
             return menuBar.openTemporarily(item)
         }
-        guard !menuBar.isBusy else { return false }
         let menuBar = self.menuBar!
-        ItemOpener.open(item, if: { !menuBar.isBusy })
+        ItemOpener.open(item)
         return true
     }
 

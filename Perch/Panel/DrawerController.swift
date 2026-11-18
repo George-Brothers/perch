@@ -199,7 +199,7 @@ struct DrawerView: View {
         Divider()
         Button("Show in Menu Bar") {
             onClose()
-            engine.setPriority(.shown, for: item)
+            engine.place(item, .before(.divider, shown: true), priority: .shown)
         }
         Divider()
         Button("Arrange Icons…", action: onArrange)

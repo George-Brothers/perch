@@ -25,19 +25,46 @@ final class MenuBarController: NSObject, ObservableObject {
         var isRevealed: Bool { self == .revealed }
     }
 
+    /// Each of Perch's items has two names it switches between. To move an
+    /// item, Perch creates it again under the other name at the new position,
+    /// then removes the old one: removing an item makes macOS forget its
+    /// position, so the new one can't reuse the old name.
     private enum Autosave {
-        static let perch = "PerchIcon"
-        static let hidden = "PerchHiddenDivider"
-        static let all = [perch, hidden]
+        static let perchNames = ["PerchIcon", "PerchIconB"]
+        static let dividerNames = ["PerchHiddenDivider", "PerchHiddenDividerB"]
+        static let all = perchNames + dividerNames
+        private static let perchKey = "perchItemName"
+        private static let dividerKey = "dividerItemName"
+
+        static var perch: String { current(perchNames, perchKey) }
+        static var hidden: String { current(dividerNames, dividerKey) }
+
+        /// Switches to the other name and returns it.
+        static func switchPerch() -> String { next(perchNames, perchKey) }
+        static func switchDivider() -> String { next(dividerNames, dividerKey) }
+
+        static func resetNames() {
+            UserDefaults.standard.removeObject(forKey: perchKey)
+            UserDefaults.standard.removeObject(forKey: dividerKey)
+        }
+
+        private static func current(_ names: [String], _ key: String) -> String {
+            UserDefaults.standard.string(forKey: key).flatMap { names.contains($0) ? $0 : nil } ?? names[0]
+        }
+
+        private static func next(_ names: [String], _ key: String) -> String {
+            let name = current(names, key) == names[0] ? names[1] : names[0]
+            UserDefaults.standard.set(name, forKey: key)
+            return name
+        }
     }
 
     /// macOS orders status items by a saved "preferred position": smaller means
     /// further right. Control Center sits around 130. Seeding these before the
     /// items exist puts Perch just left of Control Center with the divider beside it.
-    private static let seededPositions: [String: Double] = [
-        Autosave.perch: 100,
-        Autosave.hidden: 101,
-    ]
+    private static var seededPositions: [String: Double] {
+        [Autosave.perch: 100, Autosave.hidden: 101]
+    }
 
     private static let collapsedLength: CGFloat = 10_000
     /// Starting width; the real width hugs the icon (see `updatePerchIcon`).
@@ -80,8 +107,6 @@ final class MenuBarController: NSObject, ObservableObject {
     private var placementAttempts = 0
     private var hasReset = false
     private var barClickMonitor: Any?
-    /// While Perch moves icons it shows and hides the bar itself; clicks wait.
-    var isBusy = false
 
     init(preferences: Preferences) {
         self.preferences = preferences
@@ -98,7 +123,6 @@ final class MenuBarController: NSObject, ObservableObject {
     // MARK: - Showing and hiding
 
     func toggle() {
-        guard !isBusy else { return }
         visibility.isRevealed ? collapse() : reveal()
     }
 
@@ -142,7 +166,6 @@ final class MenuBarController: NSObject, ObservableObject {
     /// Returns false when Perch is busy arranging and can't open it now.
     @discardableResult
     func openTemporarily(_ item: MenuBarItem) -> Bool {
-        guard !isBusy else { return false }
         // A newer open replaces an older one that hasn't finished.
         stopMenuWatch()
         if !visibility.isRevealed {
@@ -155,7 +178,7 @@ final class MenuBarController: NSObject, ObservableObject {
         let request = pendingOpen
         let isCurrent = { [weak self] in
             guard let self else { return false }
-            return self.pendingOpen == request && self.visibility.isRevealed && !self.isBusy
+            return self.pendingOpen == request && self.visibility.isRevealed
         }
         // Its menu opens wherever the icon is, so wait until it's on screen.
         whenOnScreen(item, attempts: 20) { [weak self] onScreen in
@@ -213,7 +236,7 @@ final class MenuBarController: NSObject, ObservableObject {
                 // Done when the menu closed, or if none ever opened, or after 2 minutes.
                 if (!open && (sawMenu || checks >= 5)) || checks > 300 {
                     self.stopMenuWatch()
-                    if self.visibility.isRevealed, !self.isBusy { self.collapse() }
+                    if self.visibility.isRevealed { self.collapse() }
                 }
             }
         }
@@ -246,7 +269,6 @@ final class MenuBarController: NSObject, ObservableObject {
 
     /// Puts Perch's items back next to Control Center, in the right order.
     func resetPositions() {
-        guard !isBusy else { return }
         rehider.disarm()
         for item in [perchItem, hiddenDivider] {
             if let item { NSStatusBar.system.removeStatusItem(item) }
@@ -257,6 +279,7 @@ final class MenuBarController: NSObject, ObservableObject {
             defaults.removeObject(forKey: "NSStatusItem Visible \(name)")
             defaults.removeObject(forKey: "NSStatusItem VisibleCC \(name)")
         }
+        Autosave.resetNames()
         visibility = .revealed
         seedPositionsIfNeeded()
         createItems()
@@ -266,9 +289,13 @@ final class MenuBarController: NSObject, ObservableObject {
     // MARK: - Items
 
     private func createItems() {
-        let bar = NSStatusBar.system
+        makePerchItem()
+        makeDivider()
+        apply()
+    }
 
-        perchItem = bar.statusItem(withLength: Self.perchLength)
+    private func makePerchItem() {
+        perchItem = NSStatusBar.system.statusItem(withLength: Self.perchLength)
         perchItem.autosaveName = Autosave.perch
         if let button = perchItem.button {
             button.target = self
@@ -277,8 +304,10 @@ final class MenuBarController: NSObject, ObservableObject {
             button.setAccessibilityLabel("Perch")
             button.toolTip = "Click to show or hide icons. Right-click to arrange."
         }
+    }
 
-        hiddenDivider = bar.statusItem(withLength: Self.dividerLength)
+    private func makeDivider() {
+        hiddenDivider = NSStatusBar.system.statusItem(withLength: Self.dividerLength)
         hiddenDivider.autosaveName = Autosave.hidden
         if let button = hiddenDivider.button {
             button.target = self
@@ -287,8 +316,71 @@ final class MenuBarController: NSObject, ObservableObject {
             button.setAccessibilityLabel("Perch divider")
             button.toolTip = "Click to hide icons. Right-click to arrange."
         }
+    }
 
+    // MARK: - Moving Perch's own items
+
+    /// Saved position of the divider: everything with a larger position (further
+    /// left) is hidden. See `StatusItemPositions`.
+    var dividerPosition: Double? {
+        UserDefaults.standard.object(forKey: Self.positionKey(Autosave.hidden)) as? Double
+    }
+
+    var perchPosition: Double? {
+        UserDefaults.standard.object(forKey: Self.positionKey(Autosave.perch)) as? Double
+    }
+
+    /// Moves the divider by recreating it at `position`. Instant, and no mouse:
+    /// macOS puts a new item wherever its saved position says.
+    func moveDivider(to position: Double) {
+        guard dividerPosition.map({ abs($0 - position) > 0.01 }) ?? true else { return }
+        let old = hiddenDivider
+        Self.save(position, for: Autosave.switchDivider())
+        makeDivider()
+        if let old { NSStatusBar.system.removeStatusItem(old) }
         apply()
+    }
+
+    /// Moves Perch's own line or icon the same way.
+    func movePerch(to position: Double) {
+        guard perchPosition.map({ abs($0 - position) > 0.01 }) ?? true else { return }
+        let old = perchItem
+        Self.save(position, for: Autosave.switchPerch())
+        makePerchItem()
+        if let old { NSStatusBar.system.removeStatusItem(old) }
+        apply()
+    }
+
+    private static func save(_ position: Double, for name: String) {
+        let defaults = UserDefaults.standard
+        defaults.set(position, forKey: positionKey(name))
+        // Removing an item can mark it hidden; a new one should show.
+        defaults.removeObject(forKey: "NSStatusItem Visible \(name)")
+        defaults.removeObject(forKey: "NSStatusItem VisibleCC \(name)")
+    }
+
+    private var standIns: [String: NSStatusItem] = [:]
+
+    /// Holds an icon's spot open with a blank item while its app restarts,
+    /// so the icons next to it don't shift back and forth.
+    func holdSpot(for key: String, width: CGFloat, at position: Double) {
+        releaseSpot(for: key)
+        let name = "PerchStandIn\(standIns.count)"
+        Self.save(position, for: name)
+        let item = NSStatusBar.system.statusItem(withLength: width)
+        item.autosaveName = name
+        item.button?.setAccessibilityLabel("Perch placeholder")
+        standIns[key] = item
+    }
+
+    func releaseSpot(for key: String) {
+        guard let item = standIns.removeValue(forKey: key) else { return }
+        let name = item.autosaveName ?? ""
+        NSStatusBar.system.removeStatusItem(item)
+        let defaults = UserDefaults.standard
+        for prefix in ["NSStatusItem Preferred Position ", "NSStatusItem Visible ", "NSStatusItem VisibleCC "] {
+            defaults.removeObject(forKey: prefix + name)
+        }
     }
 
     /// Earlier versions had an "Archived" divider. Remove its saved state.
@@ -468,8 +560,8 @@ final class MenuBarController: NSObject, ObservableObject {
     }
 
     private func barClicked(_ event: NSEvent) {
-        // Single clicks only, and not ⌘-drags (yours or Perch's own moves).
-        guard !isBusy, event.clickCount == 1, !event.modifierFlags.contains(.command),
+        // Single clicks only, and not ⌘-drags.
+        guard event.clickCount == 1, !event.modifierFlags.contains(.command),
               MenuBarGeometry.isEmptyMenuBarSpace(NSEvent.mouseLocation),
               !MenuBarGeometry.isMenuOpen() else { return }
         if Self.wantsArrange(event) {
