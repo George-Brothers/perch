@@ -50,10 +50,9 @@ enum MenuBarSpacing {
     /// Quits and reopens each app that has a menu bar icon, plus Control
     /// Center, so they all draw with the new spacing. Perch reopens itself last.
     /// Apps that don't quit (an unsaved document, say) are left running and listed.
-    static func reopenMenuBarApps(_ items: [MenuBarItem]) {
+    static func reopenMenuBarApps(_ apps: [NSRunningApplication]) {
         guard !isApplying else { return }
         isApplying = true
-        let apps = appsToReopen(items)
 
         Task {
             var notReopened: [String] = []

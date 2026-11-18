@@ -9,6 +9,7 @@ struct FeaturesPane: View {
     @State private var spacing = Double(MenuBarSpacing.current)
     @State private var appliedSpacing = MenuBarSpacing.current
     @State private var confirmingReopen = false
+    @State private var appsToReopen: [NSRunningApplication] = []
 
     var body: some View {
         Form {
@@ -62,7 +63,13 @@ struct FeaturesPane: View {
                 }
                 SpacingPreview(spacing: CGFloat(spacing.rounded()))
                 LabeledContent("Reopens apps with menu bar icons") {
-                    Button("Apply…") { confirmingReopen = true }
+                    Button("Apply…") {
+                        Task {
+                            // The list you confirm is exactly the list Perch reopens.
+                            appsToReopen = MenuBarSpacing.appsToReopen(await engine.rescan())
+                            confirmingReopen = true
+                        }
+                    }
                         .disabled(Int(spacing.rounded()) == appliedSpacing || MenuBarSpacing.isApplying)
                 }
             }
@@ -92,9 +99,8 @@ struct FeaturesPane: View {
         }
     }
 
-    /// The same apps `MenuBarSpacing.reopenMenuBarApps` reopens.
     private var reopenList: String {
-        let names = Set(MenuBarSpacing.appsToReopen(engine.items).compactMap(\.localizedName)).sorted()
+        let names = Set(appsToReopen.compactMap(\.localizedName)).sorted()
         return (names + ["Control Center", "Perch"]).joined(separator: ", ")
     }
 
@@ -102,7 +108,7 @@ struct FeaturesPane: View {
         let value = Int(spacing.rounded())
         MenuBarSpacing.set(value)
         appliedSpacing = value
-        MenuBarSpacing.reopenMenuBarApps(engine.items)
+        MenuBarSpacing.reopenMenuBarApps(appsToReopen)
     }
 
     /// Turning the drawer on explains the permission first, unless Perch already has it.

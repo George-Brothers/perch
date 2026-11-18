@@ -55,7 +55,11 @@ final class IconImages: ObservableObject {
         while isCapturing { try? await Task.sleep(for: .milliseconds(50)) }
     }
 
+    /// Bumped by `clear()`, so a capture already running can't bring pictures back.
+    private var clearCount = 0
+
     func clear() {
+        clearCount += 1
         images = [:]
         captured = [:]
         iconsAreLight = false
@@ -64,6 +68,7 @@ final class IconImages: ObservableObject {
     /// Captures the given icons that are on screen right now.
     func capture(_ items: [MenuBarItem]) async {
         guard !items.isEmpty, !isCapturing, CGPreflightScreenCaptureAccess() else { return }
+        let session = clearCount
         isCapturing = true
         defer { isCapturing = false }
 
@@ -126,6 +131,8 @@ final class IconImages: ObservableObject {
             updated[key] = image
             captured[key] = (now, widths[key] ?? image.size.width)
         }
+        // Turned the drawer off meanwhile: drop what came back.
+        guard session == clearCount else { return }
         images = updated
         // Judge from every picture, so one colorful new icon can't flip the look.
         iconsAreLight = Self.averageLuminance(of: Array(updated.values)) > 0.6

@@ -140,7 +140,10 @@ final class MenuBarController: NSObject, ObservableObject {
         }
         pendingOpen += 1
         let request = pendingOpen
-        let isCurrent = { [weak self] in self?.pendingOpen == request && self?.visibility.isRevealed == true }
+        let isCurrent = { [weak self] in
+            guard let self else { return false }
+            return self.pendingOpen == request && self.visibility.isRevealed && !self.isBusy
+        }
         // Its menu opens wherever the icon is, so wait until it's on screen.
         whenOnScreen(item, attempts: 20) { [weak self] onScreen in
             guard let self, isCurrent() else { return }

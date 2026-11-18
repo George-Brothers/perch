@@ -69,7 +69,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard preferences.drawerEnabled, permissions.hasScreenRecording,
                   !MenuBarGeometry.isMenuOpen() else { return }
             let items = await engine.rescan()
-            guard !MenuBarGeometry.isMenuOpen() else { return }
+            // Checked again: the drawer may have been turned off during the scan.
+            guard preferences.drawerEnabled, !MenuBarGeometry.isMenuOpen() else { return }
             await images.capture(items.filter { $0.section != .notShowing && images.needsCapture($0) })
         }
         menuBar.beforeFirstHide = captureVisible
@@ -229,7 +230,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if item.section == .hidden {
             return menuBar.openTemporarily(item)
         }
-        ItemOpener.open(item)
+        guard !menuBar.isBusy else { return false }
+        let menuBar = self.menuBar!
+        ItemOpener.open(item, if: { !menuBar.isBusy })
         return true
     }
 
