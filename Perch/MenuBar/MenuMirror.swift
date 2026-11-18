@@ -25,6 +25,18 @@ enum MenuMirror {
         let children: [Entry]
         /// Indexes from the top menu down to this item.
         let path: [Int]
+        /// Titles along the same path, to check the real menu still matches.
+        let titles: [String]
+    }
+
+    /// What a copied item needs to press the real one.
+    private final class Pick: NSObject {
+        let path: [Int]
+        let titles: [String]
+        init(path: [Int], titles: [String]) {
+            self.path = path
+            self.titles = titles
+        }
     }
 
     private enum Result {
@@ -83,7 +95,7 @@ enum MenuMirror {
 
         for _ in 0..<30 {
             if let menu = AX.elements(element, kAXChildrenAttribute).first(where: { AX.string($0, kAXRoleAttribute) == "AXMenu" }) {
-                let entries = read(menu, path: [])
+                let entries = read(menu, path: [], titles: [])
                 _ = AXUIElementPerformAction(menu, kAXCancelAction as CFString)
                 return .menu(entries)
             }
@@ -103,7 +115,7 @@ enum MenuMirror {
         return .nothing
     }
 
-    private nonisolated static func read(_ menu: AXUIElement, path: [Int]) -> [Entry] {
+    private nonisolated static func read(_ menu: AXUIElement, path: [Int], titles: [String]) -> [Entry] {
         AX.elements(menu, kAXChildrenAttribute).enumerated().map { index, element in
             let title = AX.string(element, kAXTitleAttribute) ?? ""
             let enabled = AX.raw(element, kAXEnabledAttribute) as? Bool ?? true
@@ -120,8 +132,9 @@ enum MenuMirror {
                 key: AX.string(element, "AXMenuItemCmdChar") ?? "",
                 modifiers: modifiers,
                 isSeparator: title.isEmpty && !enabled && submenu == nil,
-                children: submenu.map { read($0, path: path + [index]) } ?? [],
-                path: path + [index]
+                children: submenu.map { read($0, path: path + [index], titles: titles + [title]) } ?? [],
+                path: path + [index],
+                titles: titles + [title]
             )
         }
     }
@@ -155,7 +168,7 @@ enum MenuMirror {
             if entry.children.isEmpty {
                 menuItem.target = handler
                 menuItem.action = #selector(Handler.pick(_:))
-                menuItem.representedObject = entry.path
+                menuItem.representedObject = Pick(path: entry.path, titles: entry.titles)
             } else {
                 let submenu = NSMenu(title: entry.title)
                 add(entry.children, to: submenu, handler: handler)
@@ -174,18 +187,18 @@ enum MenuMirror {
         }
 
         @objc func pick(_ sender: NSMenuItem) {
-            guard let path = sender.representedObject as? [Int] else { return }
+            guard let pick = sender.representedObject as? Pick else { return }
             picked = true
             let element = item.element
-            let title = sender.title
+            let path = pick.path, titles = pick.titles
             Task.detached(priority: .userInitiated) {
-                MenuMirror.press(path: path, title: title, in: element)
+                MenuMirror.press(path: path, titles: titles, in: element)
             }
         }
     }
 
     /// Opens the real menu off screen again and presses the item at `path`.
-    private nonisolated static func press(path: [Int], title: String, in element: AXUIElement) {
+    private nonisolated static func press(path: [Int], titles: [String], in element: AXUIElement) {
         AXUIElementSetMessagingTimeout(element, 0.3)
         _ = AXUIElementPerformAction(element, kAXPressAction as CFString)
         var menu: AXUIElement?
@@ -199,10 +212,17 @@ enum MenuMirror {
         for (depth, index) in path.enumerated() {
             let items = AX.elements(current, kAXChildrenAttribute)
             let isLast = depth == path.count - 1
-            // The menu may have changed since it was copied; trust the title for the last step.
+            // The menu may have changed since it was copied (an app can
+            // reorder its submenus). Every step must still have the title it
+            // had; if it moved, take the one item with that title, never a guess.
+            let title = depth < titles.count ? titles[depth] : ""
             var found = index < items.count ? items[index] : nil
-            if isLast, let candidate = found, AX.string(candidate, kAXTitleAttribute) != title {
-                found = items.first { AX.string($0, kAXTitleAttribute) == title }
+            if let candidate = found, (AX.string(candidate, kAXTitleAttribute) ?? "") != title {
+                found = nil
+            }
+            if found == nil, !title.isEmpty {
+                let matches = items.filter { AX.string($0, kAXTitleAttribute) == title }
+                found = matches.count == 1 ? matches[0] : nil
             }
             guard let next = found else { break }
             if isLast {
