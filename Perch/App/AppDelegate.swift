@@ -96,8 +96,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         preferences.$drawerEnabled
             .dropFirst()
             .removeDuplicates()
-            .filter { $0 }
-            .sink { _ in
+            .sink { on in
+                // Turned off: forget the pictures.
+                guard on else { return images.clear() }
                 guard permissions.hasScreenRecording, !menuBar.isBusy, !engine.isArranging,
                       !menuBar.visibility.isRevealed else { return }
                 Task {
@@ -198,7 +199,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menuBar.reveal()
     }
 
+    /// Opens search; running it again leaves search open.
     func searchIcons() {
+        if searchPanel.isOpen { return }
         openSearchAction?()
     }
 
@@ -209,17 +212,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Opens the icon with this key. Returns false if it's gone.
     func openIcon(key: String) async -> Bool {
         guard let item = await icons().first(where: { $0.key == key }) else { return false }
-        open(item)
-        return true
+        return open(item)
     }
 
     /// Opens an icon's menu. A hidden icon comes out just until its menu closes.
-    private func open(_ item: MenuBarItem) {
+    /// False when Perch is busy arranging.
+    @discardableResult
+    private func open(_ item: MenuBarItem) -> Bool {
         if item.section == .hidden {
-            menuBar.openTemporarily(item)
-        } else {
-            ItemOpener.open(item)
+            return menuBar.openTemporarily(item)
         }
+        ItemOpener.open(item)
+        return true
     }
 
     /// Opening Perch again (from Finder, Spotlight or the Dock) shows Settings,

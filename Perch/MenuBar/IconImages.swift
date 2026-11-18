@@ -21,6 +21,11 @@ final class IconImages: ObservableObject {
 
     func image(for item: MenuBarItem) -> NSImage? { images[item.key] }
 
+    func clear() {
+        images = [:]
+        iconsAreLight = false
+    }
+
     /// Captures the given icons that are on screen right now.
     func capture(_ items: [MenuBarItem]) async {
         guard !items.isEmpty, !isCapturing, CGPreflightScreenCaptureAccess() else { return }

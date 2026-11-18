@@ -49,7 +49,14 @@ enum MenuBarGeometry {
             return false
         }
         let menuLevel = Int(CGWindowLevelForKey(.popUpMenuWindow))
-        let barHeight = NSScreen.main.map(menuBarHeight(for:)) ?? 24
+        // Window bounds use a top-left origin on the primary display; find each
+        // display's top edge and bar height in those terms (displays can be stacked).
+        let primaryTop = NSScreen.screens.first?.frame.maxY ?? 0
+        let bars = NSScreen.screens.map { screen in
+            (frame: CGRect(x: screen.frame.minX, y: primaryTop - screen.frame.maxY,
+                           width: screen.frame.width, height: screen.frame.height),
+             height: menuBarHeight(for: screen))
+        }
         for window in windows {
             // Perch's own panels sit at menu level but aren't menus.
             if let number = window[kCGWindowNumber as String] as? Int, ignoredWindowNumbers.contains(number) { continue }
@@ -63,7 +70,9 @@ enum MenuBarGeometry {
             else { continue }
             // Menu bar icons themselves are exactly bar-height. Anything taller
             // that starts at or just under the menu bar is a panel hanging from it.
-            if bounds.minY <= barHeight + 4, bounds.height > barHeight + 4 {
+            let top = CGPoint(x: bounds.midX, y: bounds.minY)
+            guard let bar = bars.first(where: { $0.frame.contains(top) }) else { continue }
+            if bounds.minY <= bar.frame.minY + bar.height + 4, bounds.height > bar.height + 4 {
                 return true
             }
         }

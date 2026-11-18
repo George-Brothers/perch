@@ -235,6 +235,7 @@ private struct DrawerIcon: View {
                         .interpolation(.high)
                         .aspectRatio(contentMode: .fit)
                         .frame(height: min(image.size.height, 24))
+                        .frame(minWidth: 26)
                 } else {
                     ItemIcon(item: item)
                         .frame(width: 18, height: 18)
@@ -251,5 +252,6 @@ private struct DrawerIcon: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .help(item.displayName)
+        .accessibilityLabel(item.displayName)
     }
 }

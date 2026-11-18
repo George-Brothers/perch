@@ -44,27 +44,48 @@ enum MenuBarSpacing {
             .filter { !($0.bundleIdentifier ?? "com.apple.").hasPrefix("com.apple.") }
     }
 
+    /// True while apps are being reopened, so Apply can't start a second round.
+    private(set) static var isApplying = false
+
     /// Quits and reopens each app that has a menu bar icon, plus Control
     /// Center, so they all draw with the new spacing. Perch reopens itself last.
+    /// Apps that don't quit (an unsaved document, say) are left running and listed.
     static func reopenMenuBarApps(_ items: [MenuBarItem]) {
+        guard !isApplying else { return }
+        isApplying = true
         let apps = appsToReopen(items)
 
         Task {
+            var notReopened: [String] = []
             for app in apps {
+                let name = app.localizedName ?? "An app"
                 guard let url = app.bundleURL else { continue }
                 app.terminate()
-                // Give each app up to three seconds to quit on its own.
-                for _ in 0..<30 where !app.isTerminated {
+                // Give each app up to ten seconds to quit on its own.
+                for _ in 0..<100 where !app.isTerminated {
                     try? await Task.sleep(for: .milliseconds(100))
                 }
                 guard app.isTerminated else {
-                    log.notice("\(app.localizedName ?? "an app", privacy: .public) didn't quit; skipping it")
+                    log.notice("\(name, privacy: .public) didn't quit; skipping it")
+                    notReopened.append(name)
                     continue
                 }
                 let configuration = NSWorkspace.OpenConfiguration()
                 configuration.activates = false
                 configuration.addsToRecentItems = false
-                _ = try? await NSWorkspace.shared.openApplication(at: url, configuration: configuration)
+                do {
+                    _ = try await NSWorkspace.shared.openApplication(at: url, configuration: configuration)
+                } catch {
+                    log.error("couldn't reopen \(name, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                    notReopened.append(name)
+                }
+            }
+            if !notReopened.isEmpty {
+                let alert = NSAlert()
+                alert.messageText = "Some apps weren't reopened"
+                alert.informativeText = "\(notReopened.joined(separator: ", ")) didn't quit or reopen. They'll use the new spacing the next time they open."
+                NSApp.activate()
+                alert.runModal()
             }
             // macOS restarts Control Center by itself.
             let killall = Process()

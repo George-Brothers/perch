@@ -15,7 +15,7 @@ struct FeaturesPane: View {
             Section {
                 Toggle(isOn: drawerBinding) {
                     Text("Hidden icons drawer")
-                    Text("Click the bird and hidden icons drop down in a small bar under the menu bar. Needs Screen Recording; Perch asks only if you turn this on.")
+                    Text("Click Perch's menu bar icon and hidden icons drop down in a small bar under the menu bar. Needs Screen Recording; Perch asks only if you turn this on.")
                 }
                 if preferences.drawerEnabled && !permissions.hasScreenRecording {
                     LabeledContent {
@@ -61,10 +61,9 @@ struct FeaturesPane: View {
                     Text("Fit more icons in the menu bar.")
                 }
                 SpacingPreview(spacing: CGFloat(spacing.rounded()))
-                if Int(spacing.rounded()) != appliedSpacing {
-                    LabeledContent("Reopens apps with menu bar icons") {
-                        Button("Apply…") { confirmingReopen = true }
-                    }
+                LabeledContent("Reopens apps with menu bar icons") {
+                    Button("Apply…") { confirmingReopen = true }
+                        .disabled(Int(spacing.rounded()) == appliedSpacing || MenuBarSpacing.isApplying)
                 }
             }
         }

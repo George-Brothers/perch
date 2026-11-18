@@ -91,6 +91,7 @@ final class MenuBarController: NSObject, ObservableObject {
 
     func reveal(armAutoHide: Bool = true) {
         stopMenuWatch()
+        isTemporaryReveal = false
         visibility = .revealed
         apply()
         if armAutoHide { rehider.arm() } else { rehider.disarm() }
@@ -98,6 +99,7 @@ final class MenuBarController: NSObject, ObservableObject {
 
     func collapse() {
         stopMenuWatch()
+        isTemporaryReveal = false
         rehider.disarm()
         guard perchIsRightOfDivider() else {
             // The bird ended up on the hidden side, so hiding would hide Perch
@@ -118,45 +120,57 @@ final class MenuBarController: NSObject, ObservableObject {
         apply()
     }
 
+    /// True while the bar is out only for an icon opened from the drawer or
+    /// search, so Perch hides it again when that icon's menu closes.
+    private var isTemporaryReveal = false
+
     /// Opens a hidden icon picked from the drawer or search: shows the hidden icons just
     /// long enough for its menu, then hides them again when the menu closes.
-    func openTemporarily(_ item: MenuBarItem) {
-        guard !isBusy else { return }
-        // Opening a second icon before the first one's menu closed: keep the
-        // bar out until this one's menu closes instead.
-        let watching = menuWatch != nil
+    /// Returns false when Perch is busy arranging and can't open it now.
+    @discardableResult
+    func openTemporarily(_ item: MenuBarItem) -> Bool {
+        guard !isBusy else { return false }
+        // A newer open replaces an older one that hasn't finished.
         stopMenuWatch()
-        let wasRevealed = visibility.isRevealed && !watching
         if !visibility.isRevealed {
             visibility = .revealed
             apply()
             rehider.disarm()
+            isTemporaryReveal = true
         }
         pendingOpen += 1
         let request = pendingOpen
+        let isCurrent = { [weak self] in self?.pendingOpen == request && self?.visibility.isRevealed == true }
         // Its menu opens wherever the icon is, so wait until it's on screen.
-        whenOnScreen(item, attempts: 20) { [weak self] in
-            guard let self, self.pendingOpen == request, self.visibility.isRevealed else { return }
-            ItemOpener.open(item)
-            if !wasRevealed { self.collapseWhenMenuCloses() }
+        whenOnScreen(item, attempts: 20) { [weak self] onScreen in
+            guard let self, isCurrent() else { return }
+            guard onScreen else {
+                self.log.notice("\(item.displayName, privacy: .public) didn't come on screen; not opening it")
+                if self.isTemporaryReveal { self.collapse() }
+                return
+            }
+            ItemOpener.open(item, if: isCurrent)
+            if self.isTemporaryReveal { self.collapseWhenMenuCloses() }
         }
+        return true
     }
 
     /// The latest `openTemporarily` request; older ones that are still waiting give up.
     private var pendingOpen = 0
 
-    /// Runs `action` once the icon has moved on screen, checking every 50 ms
-    /// for up to `attempts` tries (then runs it anyway).
-    private func whenOnScreen(_ item: MenuBarItem, attempts: Int, _ action: @escaping () -> Void) {
+    /// Calls `action(true)` once the icon has moved on screen, checking every
+    /// 50 ms for up to `attempts` tries, or `action(false)` if it never does.
+    private func whenOnScreen(_ item: MenuBarItem, attempts: Int, _ action: @escaping (Bool) -> Void) {
         let onScreen = AX.frame(of: item.element).map { MenuBarGeometry.isOnScreen($0, screen: screen) } ?? false
-        if onScreen || attempts <= 0 {
+        if onScreen {
             // A moment more for the move to settle.
             Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(80))
-                action()
+                action(true)
             }
             return
         }
+        guard attempts > 0 else { return action(false) }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
             self?.whenOnScreen(item, attempts: attempts - 1, action)
         }
