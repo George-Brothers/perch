@@ -316,12 +316,15 @@ final class LayoutEngine: ObservableObject {
             }
             waitsForClose = queued != nil && holdsMoves
         }
-        if placeDivider(in: current) {
+        // Usually once; twice if Perch's item had to move to the cut first.
+        var moved = false
+        for _ in 0..<3 {
+            guard placeDivider(in: current) else { break }
+            moved = true
             await menuBar.settle()
-            await settledScan()
-        } else {
-            await scan()
+            current = await settledScan()
         }
+        if !moved { await scan() }
     }
 
     /// Whether the login window is covering the screen.
@@ -675,26 +678,32 @@ final class LayoutEngine: ObservableObject {
         var room = rightBound - leftBound - reserved - 8
         publishRoom(room, screen: screen, rightBound: rightBound, reserved: reserved, gap: gap)
 
+        // Perch's own item always stays shown, so its room comes first.
+        let perchIndex = list.firstIndex { $0.kind == .perch }
+        if let perchIndex { room -= list[perchIndex].width + gap }
+
         // Walk right to left; `cut` ends up at the leftmost entry that stays shown.
         let movable = list.filter { $0.kind != .fixed }
         var cut = list.firstIndex { $0.kind == .fixed } ?? list.endIndex
         for entry in movable.reversed() {
+            guard case .icon(let key) = entry.kind else { continue }
+            // Icons macOS places itself are already counted in `reserved`.
+            guard items.first(where: { $0.key == key })?.isMovable == true else { continue }
             let cost = entry.width + gap
-            if case .icon(let key) = entry.kind {
-                let hides = preferences.priority(for: key) == .hidden
-                guard !hides, cost <= room else { break }
-            } else if cost > room {
-                break
-            }
+            guard preferences.priority(for: key) != .hidden, cost <= room else { break }
             room -= cost
             cut = list.firstIndex { $0.kind == entry.kind } ?? cut
         }
 
-        // Perch's own item always stays shown: if the cut fell right of it, move it over.
-        if let perchIndex = list.firstIndex(where: { $0.kind == .perch }), perchIndex < cut,
-           let position = Self.between(cut > 0 ? list[cut - 1] : nil, cut < list.count ? list[cut] : nil) {
-            menuBar.movePerch(to: position)
-            return true // Perch moved; the next scan places the divider.
+        // If the cut fell right of Perch's item, move Perch to the cut; the
+        // caller then places the divider left of it.
+        if let perchIndex, perchIndex < cut {
+            if perchIndex == cut - 1 {
+                cut = perchIndex
+            } else if let position = Self.between(cut > 0 ? list[cut - 1] : nil, cut < list.count ? list[cut] : nil),
+                      menuBar.movePerch(to: position) {
+                return true
+            }
         }
 
         let leftOfCut = cut > 0 ? list[cut - 1] : nil
@@ -706,9 +715,9 @@ final class LayoutEngine: ObservableObject {
             if afterLeft && beforeRight { return false }
         }
         guard let position = Self.between(leftOfCut, rightOfCut) else { return false }
+        guard menuBar.moveDivider(to: position) else { return false }
         let shownCount = list[cut...].filter { $0.kind != .fixed }.count
         log.notice("moving the divider so \(shownCount, privacy: .public) icons show")
-        menuBar.moveDivider(to: position)
         return true
     }
 

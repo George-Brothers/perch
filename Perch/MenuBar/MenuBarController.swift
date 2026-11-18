@@ -336,23 +336,29 @@ final class MenuBarController: NSObject, ObservableObject {
 
     /// Moves the divider by recreating it at `position`. Instant, and no mouse:
     /// macOS puts a new item wherever its saved position says.
-    func moveDivider(to position: Double) {
-        guard dividerPosition.map({ abs($0 - position) > 0.01 }) ?? true else { return }
+    /// False if it's already there. Spots next to an icon Perch can't read
+    /// can be very close together, so "there" means within a millionth.
+    @discardableResult
+    func moveDivider(to position: Double) -> Bool {
+        guard dividerPosition.map({ abs($0 - position) > 1e-6 }) ?? true else { return false }
         let old = hiddenDivider
         Self.save(position, for: Autosave.switchDivider())
         makeDivider()
         if let old { NSStatusBar.system.removeStatusItem(old) }
         apply()
+        return true
     }
 
-    /// Moves Perch's own line or icon the same way.
-    func movePerch(to position: Double) {
-        guard perchPosition.map({ abs($0 - position) > 0.01 }) ?? true else { return }
+    /// Moves Perch's own line or icon the same way. False if it's already there.
+    @discardableResult
+    func movePerch(to position: Double) -> Bool {
+        guard perchPosition.map({ abs($0 - position) > 1e-6 }) ?? true else { return false }
         let old = perchItem
         Self.save(position, for: Autosave.switchPerch())
         makePerchItem()
         if let old { NSStatusBar.system.removeStatusItem(old) }
         apply()
+        return true
     }
 
     private static func save(_ position: Double, for name: String) {
