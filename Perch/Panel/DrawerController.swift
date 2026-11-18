@@ -17,8 +17,12 @@ final class DrawerController {
     /// Bumped on every open, so a fade-out that finishes late doesn't hide a reopened drawer.
     private var generation = 0
 
-    /// Opens the icon's own menu with its top-left corner at the point. Set by the app.
-    var onOpenItem: ((MenuBarItem, NSPoint) -> Void)?
+    /// Opens the icon's own menu with its top-left corner at the point, and
+    /// returns once it's done: true if Perch's bar should close too (you picked
+    /// something), false to leave it open. Set by the app.
+    var onOpenItem: ((MenuBarItem, NSPoint) async -> Bool)?
+    /// Which icon's menu is open, so it stays highlighted like in the menu bar.
+    private let state = DrawerState()
     var onOpenArrange: (() -> Void)?
 
     init(engine: LayoutEngine, images: IconImages, preferences: Preferences) {
@@ -91,13 +95,18 @@ final class DrawerController {
             engine: engine,
             images: images,
             preferences: preferences,
-            onOpen: { [weak self] item in
-                guard let self else { return }
-                // The menu drops from the clicked icon, just under the bar.
-                let bottom = (self.panel?.frame.minY ?? 0) - 2
-                let point = NSPoint(x: NSEvent.mouseLocation.x - 12, y: bottom)
-                self.close()
-                self.onOpenItem?(item, point)
+            state: state,
+            onOpen: { [weak self] item, iconMinX in
+                guard let self, let panel = self.panel, self.state.activeKey == nil else { return }
+                // The menu drops from the clicked icon, just under Perch's bar,
+                // which stays open like the menu bar does.
+                let point = NSPoint(x: panel.frame.minX + iconMinX, y: panel.frame.minY - 2)
+                self.state.activeKey = item.key
+                Task {
+                    let shouldClose = await self.onOpenItem?(item, point) ?? true
+                    self.state.activeKey = nil
+                    if shouldClose { self.close() }
+                }
             },
             onArrange: { [weak self] in
                 self?.close()
@@ -166,7 +175,9 @@ struct DrawerView: View {
     @ObservedObject var engine: LayoutEngine
     @ObservedObject var images: IconImages
     @ObservedObject var preferences: Preferences
-    let onOpen: (MenuBarItem) -> Void
+    @ObservedObject var state: DrawerState
+    /// The icon, and its left edge within the bar.
+    let onOpen: (MenuBarItem, CGFloat) -> Void
     let onArrange: () -> Void
     let onClose: () -> Void
 
@@ -183,7 +194,8 @@ struct DrawerView: View {
                     .padding(.horizontal, 10)
             } else {
                 ForEach(hidden) { item in
-                    DrawerIcon(item: item, image: images.image(for: item), onOpen: onOpen)
+                    DrawerIcon(item: item, image: images.image(for: item),
+                               isActive: state.activeKey == item.key, onOpen: onOpen)
                         .contextMenu { priorityMenu(for: item) }
                 }
             }
@@ -226,14 +238,22 @@ struct MatchIconColors: ViewModifier {
     }
 }
 
+/// What Perch's bar is showing right now.
+@MainActor
+final class DrawerState: ObservableObject {
+    @Published var activeKey: String?
+}
+
 private struct DrawerIcon: View {
     let item: MenuBarItem
     let image: NSImage?
-    let onOpen: (MenuBarItem) -> Void
+    let isActive: Bool
+    let onOpen: (MenuBarItem, CGFloat) -> Void
     @State private var hovering = false
+    @State private var minX: CGFloat = 0
 
     var body: some View {
-        Button { onOpen(item) } label: {
+        Button { onOpen(item, minX) } label: {
             Group {
                 if let image {
                     // Notched displays have a taller bar; keep the drawer slim anyway.
@@ -252,12 +272,17 @@ private struct DrawerIcon: View {
             }
             .background(
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(Color.primary.opacity(hovering ? 0.12 : 0))
+                    .fill(Color.primary.opacity(isActive ? 0.18 : (hovering ? 0.12 : 0)))
             )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
+        .background(GeometryReader { geometry in
+            Color.clear
+                .onAppear { minX = geometry.frame(in: .global).minX }
+                .onChange(of: geometry.frame(in: .global).minX) { _, x in minX = x }
+        })
         .help(item.displayName)
         .accessibilityLabel(item.displayName)
     }
