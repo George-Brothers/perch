@@ -69,7 +69,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard preferences.drawerEnabled, permissions.hasScreenRecording,
                   !MenuBarGeometry.isMenuOpen() else { return }
             let items = await engine.rescan()
-            await images.capture(items.filter { $0.section != .notShowing })
+            await images.capture(items.filter { $0.section != .notShowing && images.needsCapture($0) })
         }
         menuBar.beforeFirstHide = captureVisible
         engine.whileRevealed = captureVisible

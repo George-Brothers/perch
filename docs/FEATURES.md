@@ -16,7 +16,7 @@ Perch is a light menu bar manager for macOS. The goal: the menu bar macOS should
 | CPU while idle | about 0% |
 | Memory while idle | under 30 MB |
 | Opening the drawer, Arrange or search | under 0.2 s |
-| Icon pictures | only while the drawer or Arrange is open |
+| Icon pictures | only for icons that are new, changed size, or 30 min old (each capture flashes the purple dot) |
 
 ## Built
 

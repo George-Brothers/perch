@@ -9,6 +9,9 @@ import os
 /// Perch captures them whenever the bar is showing everything (at launch, after
 /// arranging, when you show hidden icons) and keeps the last picture of each.
 /// Never on a timer.
+///
+/// Each capture makes macOS flash its purple screen-recording dot, so Perch only
+/// captures icons that are new, changed size, or haven't been pictured for a while.
 @MainActor
 final class IconImages: ObservableObject {
     /// Picture per `MenuBarItem.key`, at the icon's size in points.
@@ -18,11 +21,22 @@ final class IconImages: ObservableObject {
 
     private let log = Logger(subsystem: "com.georgebrothers.perch", category: "images")
     private var isCapturing = false
+    /// When each icon was pictured, and how wide it was then.
+    private var captured: [String: (date: Date, width: CGFloat)] = [:]
+    private static let maxAge: TimeInterval = 30 * 60
+
+    /// True when the icon has no picture, its picture is a different size, or it's old.
+    func needsCapture(_ item: MenuBarItem) -> Bool {
+        guard images[item.key] != nil, let last = captured[item.key] else { return true }
+        let sizeChanged = abs(last.width - item.frame.width) > 1
+        return sizeChanged || Date().timeIntervalSince(last.date) > Self.maxAge
+    }
 
     func image(for item: MenuBarItem) -> NSImage? { images[item.key] }
 
     func clear() {
         images = [:]
+        captured = [:]
         iconsAreLight = false
     }
 
@@ -44,6 +58,7 @@ final class IconImages: ObservableObject {
 
         // Pair each icon with the window that holds it.
         var jobs: [(key: String, window: SCWindow)] = []
+        let widths = Dictionary(items.map { ($0.key, $0.frame.width) }, uniquingKeysWith: { a, _ in a })
         for item in items {
             let mid = CGPoint(x: item.frame.midX, y: item.frame.midY)
             let match = barWindows
@@ -52,7 +67,7 @@ final class IconImages: ObservableObject {
             if let match { jobs.append((item.key, match)) }
         }
 
-        let captured = await withTaskGroup(of: (String, NSImage)?.self) { group in
+        let pictures = await withTaskGroup(of: (String, NSImage)?.self) { group in
             for job in jobs {
                 // SCWindow frames use a top-left origin; x matches NSScreen's.
                 let scale = NSScreen.screens
@@ -77,14 +92,19 @@ final class IconImages: ObservableObject {
             return result
         }
 
-        guard !captured.isEmpty else {
+        guard !pictures.isEmpty else {
             log.notice("no icons captured")
             return
         }
         var updated = images
-        for (key, image) in captured { updated[key] = image }
+        let now = Date()
+        for (key, image) in pictures {
+            updated[key] = image
+            captured[key] = (now, widths[key] ?? image.size.width)
+        }
         images = updated
-        iconsAreLight = Self.averageLuminance(of: captured.map(\.1)) > 0.6
+        // Judge from the new pictures: they show the bar as it looks now.
+        iconsAreLight = Self.averageLuminance(of: pictures.map(\.1)) > 0.6
     }
 
     /// Average brightness of the drawn (non-transparent) pixels, 0 to 1.
