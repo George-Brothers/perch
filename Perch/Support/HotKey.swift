@@ -18,6 +18,13 @@ struct Shortcut: Equatable {
         return flags
     }
 
+    /// The key as an `NSMenuItem` key equivalent, when it has one.
+    var keyEquivalent: String? {
+        if Int(keyCode) == kVK_Space { return " " }
+        let name = Self.keyName(keyCode)
+        return name.count == 1 && name != "?" ? name.lowercased() : nil
+    }
+
     /// How macOS menus write it, like ⌥⇧Space.
     var displayString: String {
         var text = ""

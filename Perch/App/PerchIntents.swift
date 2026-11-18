@@ -37,7 +37,9 @@ struct OpenIconIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        _ = await AppDelegate.shared?.openIcon(key: icon.id)
+        guard await AppDelegate.shared?.openIcon(key: icon.id) == true else {
+            throw IconGone()
+        }
         return .result()
     }
 }
@@ -96,4 +98,9 @@ struct PerchShortcuts: AppShortcutsProvider {
             systemImageName: "menubar.rectangle"
         )
     }
+}
+
+/// The icon's app quit or removed it since Shortcuts last looked.
+private struct IconGone: Error, CustomLocalizedStringResourceConvertible {
+    var localizedStringResource: LocalizedStringResource { "That icon isn't in the menu bar anymore." }
 }

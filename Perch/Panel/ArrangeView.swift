@@ -57,11 +57,22 @@ struct ArrangeShelves: View {
     }
 }
 
+extension IconPriority {
+    /// The same three names everywhere: shelves, right-click menus, the drawer.
+    var menuTitle: String {
+        switch self {
+        case .always: "Always Show"
+        case .auto: "Show When There's Room"
+        case .hide: "Hide"
+        }
+    }
+}
+
 private extension IconPriority {
     var shelfTitle: String {
         switch self {
-        case .always: "Always in the menu bar"
-        case .auto: "When there's room"
+        case .always: "Always show"
+        case .auto: "Show when there's room"
         case .hide: "Hidden"
         }
     }
@@ -101,7 +112,7 @@ private struct Shelf: View {
                             Text(item.displayName)
                             Divider()
                             ForEach(IconPriority.allCases.filter { $0 != priority }) { target in
-                                Button("Move to \(target.shelfTitle)") { onMove(item.key, target) }
+                                Button(target.menuTitle) { onMove(item.key, target) }
                             }
                         }
                 }
@@ -119,6 +130,8 @@ private struct Shelf: View {
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
                     .fill(Color.primary.opacity(isTargeted ? 0.1 : 0.045))
             )
+            // Its own material, so pictures of light icons stay readable in a light window.
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
                     .strokeBorder(isTargeted ? Color.accentColor.opacity(0.7) : Color.primary.opacity(0.06),

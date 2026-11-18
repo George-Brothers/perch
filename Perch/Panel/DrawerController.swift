@@ -40,6 +40,7 @@ final class DrawerController {
         position(panel)
         panel.alphaValue = 0
         panel.orderFrontRegardless()
+        panel.makeKey() // for Escape
         MenuBarGeometry.ignoredWindowNumbers.insert(panel.windowNumber)
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.12
@@ -93,7 +94,8 @@ final class DrawerController {
             onArrange: { [weak self] in
                 self?.close()
                 self?.onOpenArrange?()
-            }
+            },
+            onClose: { [weak self] in self?.close() }
         )
         let hosting = NSHostingController(rootView: view)
         hosting.sizingOptions = [.preferredContentSize]
@@ -117,7 +119,7 @@ final class DrawerController {
         guard let screen = anchor?.window?.screen ?? NSScreen.main else { return }
         let barBottom = screen.frame.maxY - MenuBarGeometry.menuBarHeight(for: screen)
         let visible = screen.frame
-        var x = (anchorFrame?.maxX ?? visible.maxX - 8) - size.width + 8
+        var x = (anchorFrame?.maxX ?? visible.maxX - 8) - size.width + 1
         x = min(max(x, visible.minX + 8), visible.maxX - size.width - 8)
         let origin = NSPoint(x: x.rounded(), y: (barBottom - 5 - size.height).rounded())
         if panel.frame.origin != origin {
@@ -157,6 +159,7 @@ struct DrawerView: View {
     @ObservedObject var preferences: Preferences
     let onOpen: (MenuBarItem) -> Void
     let onArrange: () -> Void
+    let onClose: () -> Void
 
     private var hidden: [MenuBarItem] {
         engine.items.filter { $0.section == .hidden }.sorted { $0.frame.minX < $1.frame.minX }
@@ -166,7 +169,7 @@ struct DrawerView: View {
         HStack(spacing: 0) {
             if hidden.isEmpty {
                 Text(engine.hasScanned ? "No hidden icons" : " ")
-                    .font(.system(size: 12))
+                    .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 10)
             } else {
@@ -190,8 +193,12 @@ struct DrawerView: View {
     private func priorityMenu(for item: MenuBarItem) -> some View {
         Text(item.displayName)
         Divider()
-        Button("Keep in Menu Bar") { engine.setPriority(.always, for: item) }
-        Button("Show When There's Room") { engine.setPriority(.auto, for: item) }
+        ForEach([IconPriority.always, .auto]) { priority in
+            Button(priority.menuTitle) {
+                onClose()
+                engine.setPriority(priority, for: item)
+            }
+        }
         Divider()
         Button("Arrange Icons…", action: onArrange)
     }

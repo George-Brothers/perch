@@ -25,10 +25,12 @@ enum MenuBarGeometry {
     /// Perch's own panels (drawer, Arrange, search) sit at menu level but aren't menus.
     @MainActor static var ignoredWindowNumbers: Set<Int> = []
 
-    /// Whether an icon's frame starts on some display, including displays to the
-    /// left of the main one (negative x). Hidden icons sit off every display.
-    static func isOnScreen(_ frame: CGRect) -> Bool {
-        NSScreen.screens.contains { $0.frame.minX <= frame.minX && frame.minX < $0.frame.maxX }
+    /// Whether an icon's frame starts on `screen` (any display when nil),
+    /// including displays left of the main one, whose x is negative.
+    /// Hidden icons are pushed off the left edge of their bar's display.
+    static func isOnScreen(_ frame: CGRect, screen: NSScreen? = nil) -> Bool {
+        let screens = screen.map { [$0] } ?? NSScreen.screens
+        return screens.contains { $0.frame.minX <= frame.minX && frame.minX < $0.frame.maxX }
     }
 
     /// Whether any app has a menu or menu bar panel open right now.

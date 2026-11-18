@@ -21,7 +21,7 @@ final class IconImages: ObservableObject {
 
     func image(for item: MenuBarItem) -> NSImage? { images[item.key] }
 
-    /// Captures the given icons. Cheap enough to run each time the drawer opens.
+    /// Captures the given icons that are on screen right now.
     func capture(_ items: [MenuBarItem]) async {
         guard !items.isEmpty, !isCapturing, CGPreflightScreenCaptureAccess() else { return }
         isCapturing = true

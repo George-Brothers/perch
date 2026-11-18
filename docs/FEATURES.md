@@ -23,7 +23,7 @@ Perch is a light menu bar manager for macOS. The goal: the menu bar macOS should
 | Feature | How it works |
 |---|---|
 | Show and hide | Click the bird. A divider stretched 10,000 pt pushes hidden icons off screen. |
-| Priorities | Each icon is Always, When there's room, or Hidden. Perch ⌘-drags icons across the divider to match, on launch, priority change, display change, wake, unlock, and app launch or quit. |
+| Priorities | Each icon is Always show, Show when there's room, or Hidden. Perch ⌘-drags icons across the divider to match, on launch, priority change, display change, wake, unlock, and app launch or quit. |
 | Arrange | Three shelves; drag an icon to the one you want. Right-click for the same moves. |
 | Drawer (opt-in) | Hidden icons in a small bar under the menu bar. Needs Screen Recording; turned on in Settings → Features after an explanation. |
 | Search | ⌥⇧Space by default. Type, arrow keys, Return opens the icon's menu, even when hidden. |

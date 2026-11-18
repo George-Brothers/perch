@@ -15,7 +15,7 @@ struct FeaturesPane: View {
             Section {
                 Toggle(isOn: drawerBinding) {
                     Text("Hidden icons drawer")
-                    Text("Click the bird and hidden icons drop down in a small bar under the menu bar, so nothing in it has to move.")
+                    Text("Click the bird and hidden icons drop down in a small bar under the menu bar. Needs Screen Recording; Perch asks only if you turn this on.")
                 }
                 if preferences.drawerEnabled && !permissions.hasScreenRecording {
                     LabeledContent {
@@ -28,9 +28,6 @@ struct FeaturesPane: View {
                         Text("Turn Perch on in Screen Recording, then restart Perch. Until then, hidden icons show in the menu bar.")
                     }
                 }
-            } footer: {
-                Text("The drawer needs Screen Recording permission to draw other apps' icons. Everything else in Perch works without it.")
-                    .foregroundStyle(.secondary)
             }
 
             Section {
@@ -55,17 +52,17 @@ struct FeaturesPane: View {
                 LabeledContent {
                     HStack(spacing: 8) {
                         Text("Tight").font(.caption).foregroundStyle(.secondary)
-                        Slider(value: $spacing, in: Double(MenuBarSpacing.range.lowerBound)...Double(MenuBarSpacing.range.upperBound))
+                        Slider(value: $spacing, in: Double(MenuBarSpacing.range.lowerBound)...Double(MenuBarSpacing.range.upperBound), step: 1)
                             .frame(minWidth: 160)
                         Text("Default").font(.caption).foregroundStyle(.secondary)
                     }
                 } label: {
                     Text("Icon spacing")
-                    Text("Less space between icons fits more of them in the menu bar.")
+                    Text("Fit more icons in the menu bar.")
                 }
                 SpacingPreview(spacing: CGFloat(spacing.rounded()))
                 if Int(spacing.rounded()) != appliedSpacing {
-                    LabeledContent("Apps pick this up when they reopen.") {
+                    LabeledContent("Reopens apps with menu bar icons") {
                         Button("Apply…") { confirmingReopen = true }
                     }
                 }
@@ -138,7 +135,7 @@ private struct DrawerPermissionSheet: View {
                 .font(.title3.weight(.semibold))
             VStack(alignment: .leading, spacing: 8) {
                 Text("To draw other apps' menu bar icons in the drawer, Perch needs Screen Recording permission.")
-                Text("Perch only looks at menu bar icons, only when you open the drawer. Nothing is saved or sent anywhere.")
+                Text("Perch takes pictures of menu bar icons while they're on screen, so the drawer can show them later. The pictures stay in memory and are never saved or sent.")
                 Text("Don't want that? Leave the drawer off. Perch works the same without it and shows hidden icons in the menu bar instead.")
                     .foregroundStyle(.secondary)
             }

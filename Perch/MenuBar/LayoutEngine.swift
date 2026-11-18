@@ -159,7 +159,7 @@ final class LayoutEngine: ObservableObject {
             attempted.append(move)
             guard let divider = menuBar.dividerFrame(),
                   let from = AX.frame(of: move.item.element),
-                  MenuBarGeometry.isOnScreen(from)
+                  MenuBarGeometry.isOnScreen(from, screen: menuBar.screen)
             else { continue }
             let target = CGPoint(x: move.show ? divider.maxX + 3 : divider.minX - 3, y: from.midY)
             let start = CGPoint(x: from.midX, y: from.midY)

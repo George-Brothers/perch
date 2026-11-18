@@ -53,7 +53,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 images: images,
                 onOpenItem: { item in
                     self?.arrangePanel.close()
-                    menuBar.open(item)
+                    self?.open(item)
                 },
                 onOpenSettings: {
                     self?.arrangePanel.close()
@@ -65,7 +65,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // The drawer shows pictures of hidden icons. macOS can only picture icons
         // that are on screen, so take them whenever the bar is showing everything.
         let captureVisible: () async -> Void = {
-            guard preferences.drawerEnabled, permissions.hasScreenRecording else { return }
+            // Skip while a menu is open: its icon would be pictured highlighted.
+            guard preferences.drawerEnabled, permissions.hasScreenRecording,
+                  !MenuBarGeometry.isMenuOpen() else { return }
             let items = await engine.rescan()
             await images.capture(items.filter { $0.section != .notShowing })
         }
@@ -80,7 +82,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 Task { await captureVisible() }
             }
             .store(in: &cancellables)
-        arrangePanel.onOpen = { Task { await captureVisible() } }
+        arrangePanel.onOpen = {
+            Task {
+                if preferences.drawerEnabled && permissions.hasScreenRecording {
+                    await captureVisible()
+                } else {
+                    _ = await engine.rescan()
+                }
+            }
+        }
         // Turning the drawer on (with permission already granted): show the
         // hidden icons for a moment so the drawer has pictures of them.
         preferences.$drawerEnabled
@@ -117,11 +127,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         searchPanel = PanelController(model: engine) { [weak self] in
             AnyView(SearchView(model: searchModel, engine: engine) { item in
                 self?.searchPanel.close()
-                if item.section == .hidden {
-                    menuBar.openTemporarily(item)
-                } else {
-                    ItemOpener.open(item)
-                }
+                self?.open(item)
             })
         }
         searchPanel.onOpen = {
@@ -141,8 +147,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         menuBar.openSearch = openSearch
         openSearchAction = openSearch
-        menuBar.searchShortcutTitle = {
-            preferences.searchEnabled ? preferences.searchShortcut.displayString : nil
+        menuBar.searchShortcut = {
+            preferences.searchEnabled && !preferences.searchShortcutTaken ? preferences.searchShortcut : nil
+        }
+        menuBar.usesDrawer = {
+            preferences.drawerEnabled && permissions.hasScreenRecording && permissions.hasAccessibility
         }
         hotKey = HotKey(action: openSearch)
         Publishers.CombineLatest3(preferences.$searchEnabled, preferences.$searchShortcut, preferences.$isRecordingShortcut)
@@ -200,12 +209,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Opens the icon with this key. Returns false if it's gone.
     func openIcon(key: String) async -> Bool {
         guard let item = await icons().first(where: { $0.key == key }) else { return false }
+        open(item)
+        return true
+    }
+
+    /// Opens an icon's menu. A hidden icon comes out just until its menu closes.
+    private func open(_ item: MenuBarItem) {
         if item.section == .hidden {
             menuBar.openTemporarily(item)
         } else {
             ItemOpener.open(item)
         }
-        return true
     }
 
     /// Opening Perch again (from Finder, Spotlight or the Dock) shows Settings,
