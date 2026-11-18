@@ -5,6 +5,7 @@ struct SettingsView: View {
     let preferences: Preferences
     let permissions: Permissions
     let engine: LayoutEngine
+    let images: IconImages
 
     var body: some View {
         NavigationSplitView {
@@ -25,7 +26,7 @@ struct SettingsView: View {
         switch pane {
         case .general: GeneralPane(preferences: preferences, permissions: permissions)
         case .features: FeaturesPane(preferences: preferences, permissions: permissions)
-        case .icons: IconsPane(engine: engine, preferences: preferences, permissions: permissions)
+        case .icons: IconsPane(engine: engine, preferences: preferences, permissions: permissions, images: images)
         case .about: AboutPane()
         }
     }
@@ -35,17 +36,26 @@ struct IconsPane: View {
     let engine: LayoutEngine
     let preferences: Preferences
     let permissions: Permissions
+    let images: IconImages
 
     var body: some View {
         Form {
             Section {
-                ArrangeList(engine: engine, preferences: preferences, permissions: permissions)
+                ArrangeShelves(engine: engine, preferences: preferences, permissions: permissions, images: images)
+                    .padding(.vertical, 4)
             } footer: {
-                Text("**Always** stays in the menu bar. **Auto** stays when there's room and hides when there isn't. **Hide** shows when you click Perch's icon.")
+                Text("Drag icons between shelves. Perch moves them in the menu bar for you.")
                     .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
-        .onAppear { engine.refresh() }
+        .onAppear {
+            Task {
+                let items = await engine.rescan()
+                if preferences.drawerEnabled {
+                    await images.capture(items.filter { $0.section != .notShowing })
+                }
+            }
+        }
     }
 }

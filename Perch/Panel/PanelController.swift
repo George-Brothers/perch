@@ -18,6 +18,9 @@ final class PanelController {
         self.makeContent = makeContent
     }
 
+    /// Runs each time the panel opens. Defaults to rescanning the icons.
+    var onOpen: (() -> Void)?
+
     var isOpen: Bool { panel?.isVisible == true }
 
     func toggle(anchor: NSStatusBarButton?) {
@@ -28,7 +31,7 @@ final class PanelController {
         self.anchor = anchor
         let panel = self.panel ?? makePanel()
         self.panel = panel
-        model.refresh()
+        if let onOpen { onOpen() } else { model.refresh() }
         position(panel)
         panel.orderFrontRegardless()
         panel.makeKey()
