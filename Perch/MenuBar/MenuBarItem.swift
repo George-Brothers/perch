@@ -56,7 +56,14 @@ struct MenuBarItem: Identifiable {
     }
 
     var appIcon: NSImage? {
-        NSRunningApplication(processIdentifier: pid)?.icon
+        // Live Activities belong to Control Center; show the app they're for.
+        if isLiveActivity, let identifier,
+           let url = NSWorkspace.shared.urlForApplication(
+               withBundleIdentifier: String(identifier.dropLast(".liveActivity".count))
+           ) {
+            return NSWorkspace.shared.icon(forFile: url.path)
+        }
+        return NSRunningApplication(processIdentifier: pid)?.icon
     }
 
     private static let systemNames: [String: String] = [
