@@ -24,6 +24,7 @@ struct SettingsView: View {
     private func detail(for pane: SettingsPane) -> some View {
         switch pane {
         case .general: GeneralPane(preferences: preferences, permissions: permissions)
+        case .features: FeaturesPane(preferences: preferences, permissions: permissions)
         case .icons: IconsPane(engine: engine, preferences: preferences, permissions: permissions)
         case .about: AboutPane()
         }

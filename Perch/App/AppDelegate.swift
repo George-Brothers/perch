@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var engine: LayoutEngine!
     private var settings: SettingsWindowController!
     private var arrangePanel: PanelController!
+    private var drawer: DrawerController!
 
     static func main() {
         let app = NSApplication.shared
@@ -48,11 +49,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ))
         }
 
+        let drawer = DrawerController(engine: engine, images: IconImages(), preferences: preferences)
+        self.drawer = drawer
+        drawer.onOpenItem = { item in menuBar.openFromDrawer(item) }
+        drawer.onOpenArrange = { [weak self] in self?.arrangePanel.open(anchor: menuBar.perchButton) }
+        menuBar.toggleDrawer = { [weak self] in
+            guard preferences.drawerEnabled, permissions.hasScreenRecording, permissions.hasAccessibility else {
+                return false
+            }
+            self?.arrangePanel.close()
+            self?.drawer.toggle(anchor: menuBar.perchButton)
+            return true
+        }
+
         menuBar.openSettings = { [weak self] pane in
             self?.arrangePanel.close()
             self?.settings.show(pane: pane)
         }
         menuBar.openArrange = { [weak self] anchor in
+            self?.drawer.close()
             self?.arrangePanel.toggle(anchor: anchor)
         }
 

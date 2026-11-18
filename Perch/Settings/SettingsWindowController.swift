@@ -3,6 +3,7 @@ import SwiftUI
 
 enum SettingsPane: String, CaseIterable, Identifiable {
     case general
+    case features
     case icons
     case about
 
@@ -11,6 +12,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .general: "General"
+        case .features: "Features"
         case .icons: "Icons"
         case .about: "About"
         }
@@ -19,6 +21,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .general: "gearshape"
+        case .features: "switch.2"
         case .icons: "menubar.rectangle"
         case .about: "info.circle"
         }

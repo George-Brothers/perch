@@ -56,6 +56,11 @@ final class LayoutEngine: ObservableObject {
         Task { await scan() }
     }
 
+    /// Rescans and returns the icons, for callers that need them right away.
+    func rescan() async -> [MenuBarItem] {
+        await scan()
+    }
+
     /// Asks for an arrange pass after `delay`. Repeated requests collapse into one.
     func scheduleArrange(after delay: TimeInterval = 0.4) {
         pendingArrange?.cancel()
