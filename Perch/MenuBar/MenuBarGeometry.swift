@@ -27,8 +27,11 @@ enum MenuBarGeometry {
               let front = NSWorkspace.shared.frontmostApplication?.processIdentifier else { return false }
         let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
         var element: AXUIElement?
+        // Runs on every click; a busy app must not hold it up.
+        let systemWide = AXUIElementCreateSystemWide()
+        AXUIElementSetMessagingTimeout(systemWide, 0.1)
         let error = AXUIElementCopyElementAtPosition(
-            AXUIElementCreateSystemWide(), Float(point.x), Float(primaryHeight - point.y), &element
+            systemWide, Float(point.x), Float(primaryHeight - point.y), &element
         )
         guard error == .success, let element else { return false }
         var role: CFTypeRef?
