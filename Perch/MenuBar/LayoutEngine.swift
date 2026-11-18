@@ -56,6 +56,9 @@ final class LayoutEngine: ObservableObject {
         Task { await scan() }
     }
 
+    /// Runs while a pass has every icon on screen, so the drawer can picture them.
+    var whileRevealed: (() async -> Void)?
+
     /// Rescans and returns the icons, for callers that need them right away.
     func rescan() async -> [MenuBarItem] {
         await scan()
@@ -168,6 +171,7 @@ final class LayoutEngine: ObservableObject {
             try? await Task.sleep(for: .milliseconds(150))
         }
 
+        await whileRevealed?()
         menuBar.isBusy = false
         if wasRevealed {
             menuBar.reveal()

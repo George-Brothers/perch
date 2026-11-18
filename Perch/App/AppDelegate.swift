@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 @main
@@ -9,6 +10,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settings: SettingsWindowController!
     private var arrangePanel: PanelController!
     private var drawer: DrawerController!
+    private let images = IconImages()
+    private var cancellables = Set<AnyCancellable>()
 
     static func main() {
         let app = NSApplication.shared
@@ -49,7 +52,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ))
         }
 
-        let drawer = DrawerController(engine: engine, images: IconImages(), preferences: preferences)
+        // The drawer shows pictures of hidden icons. macOS can only picture icons
+        // that are on screen, so take them whenever the bar is showing everything.
+        let images = self.images
+        let captureVisible: () async -> Void = {
+            guard preferences.drawerEnabled, permissions.hasScreenRecording else { return }
+            let items = await engine.rescan()
+            await images.capture(items.filter { $0.section != .notShowing })
+        }
+        menuBar.beforeFirstHide = captureVisible
+        engine.whileRevealed = captureVisible
+        menuBar.$visibility
+            .removeDuplicates()
+            .filter(\.isRevealed)
+            .debounce(for: .milliseconds(400), scheduler: RunLoop.main)
+            .sink { _ in
+                guard menuBar.visibility.isRevealed, !engine.isArranging else { return }
+                Task { await captureVisible() }
+            }
+            .store(in: &cancellables)
+
+        let drawer = DrawerController(engine: engine, images: images, preferences: preferences)
         self.drawer = drawer
         drawer.onOpenItem = { item in menuBar.openFromDrawer(item) }
         drawer.onOpenArrange = { [weak self] in self?.arrangePanel.open(anchor: menuBar.perchButton) }

@@ -5,8 +5,10 @@ import os
 /// Pictures of other apps' menu bar icons, for the drawer.
 ///
 /// Only works with Screen Recording permission, which Perch asks for only when
-/// you turn the drawer on. Captures happen when the drawer opens, never on a
-/// timer, and the last pictures are kept so the drawer appears instantly.
+/// you turn the drawer on. macOS can only picture icons that are on screen, so
+/// Perch captures them whenever the bar is showing everything (at launch, after
+/// arranging, when you show hidden icons) and keeps the last picture of each.
+/// Never on a timer.
 @MainActor
 final class IconImages: ObservableObject {
     /// Picture per `MenuBarItem.key`, at the icon's size in points.
@@ -40,7 +42,7 @@ final class IconImages: ObservableObject {
         for item in items {
             let mid = CGPoint(x: item.frame.midX, y: item.frame.midY)
             let match = barWindows
-                .filter { $0.frame.insetBy(dx: -1, dy: -1).contains(mid) }
+                .filter { $0.isOnScreen && $0.frame.insetBy(dx: -1, dy: -1).contains(mid) }
                 .min { $0.frame.width < $1.frame.width }
             if let match { jobs.append((item.key, match)) }
         }

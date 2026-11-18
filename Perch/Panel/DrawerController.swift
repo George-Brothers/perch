@@ -43,11 +43,9 @@ final class DrawerController {
         }
         installMonitors()
 
-        // Show what we have now, then refresh the list and the pictures.
-        Task {
-            let items = await engine.rescan()
-            await images.capture(items.filter { $0.section == .hidden })
-        }
+        // Hidden icons are off screen, so the pictures come from the last time
+        // they were showing. Just refresh which icons are hidden.
+        engine.refresh()
     }
 
     func close() {

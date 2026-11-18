@@ -50,6 +50,8 @@ final class MenuBarController: NSObject, ObservableObject {
     /// Handles a click on the bird instead of revealing, when the drawer is on.
     /// Returns false to fall back to revealing in the menu bar.
     var toggleDrawer: (() -> Bool)?
+    /// Runs once at launch while everything is still showing, before the first hide.
+    var beforeFirstHide: (() async -> Void)?
 
     var perchButton: NSStatusBarButton? { perchItem.button }
 
@@ -289,8 +291,14 @@ final class MenuBarController: NSObject, ObservableObject {
 
     private func waitForPlacement() {
         if screenFrame(of: perchItem) != nil || placementAttempts >= 12 {
-            collapse()
-            onReady?()
+            Task {
+                if let beforeFirstHide {
+                    await beforeFirstHide()
+                    self.beforeFirstHide = nil
+                }
+                collapse()
+                onReady?()
+            }
             return
         }
         placementAttempts += 1
