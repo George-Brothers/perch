@@ -8,19 +8,20 @@ A light menu bar manager for macOS. Perch hides the menu bar icons you don't nee
 
 ## What it does
 
-- **Click empty menu bar space to show or hide.** Hidden icons come back with one click and go away with another. Perch adds nothing to your bar unless you want it to: a thin line or an icon are options in Settings.
+- **Click empty menu bar space for Perch's bar.** Every icon that's hidden or doesn't fit drops down in a small bar under the menu bar. Click one and its menu opens right there, like any menu. Nothing moves in the menu bar. Perch adds nothing to your bar unless you want it to: a thin line or an icon are options in Settings.
 - **Put every icon where you want it.** Arrange mirrors your menu bar: the bar in order, then Hidden, then icons turned off in System Settings. Drag an icon anywhere and Perch moves the real one there. Order is priority: when the bar is full, icons on the left wait in Hidden until there's room.
-- **Drawer (optional).** Hidden icons drop down in a small bar under the menu bar, so nothing has to fit next to the notch. Needs Screen Recording, so it's off until you turn it on in Settings → Features.
+- **Fits your screen.** On a laptop, icons that would land behind the notch go to Perch's bar instead, in your order.
+- **Exact pictures (optional).** Perch's bar shows app icons, or with Screen Recording (Settings → Features), the icons exactly as they look.
 - **Spotlight.** Every menu bar icon shows up in Spotlight. Type its name and press Return to open its menu, even when it's hidden.
 - **Shortcuts.** Show Hidden Icons, Arrange Menu Bar and Open Menu Bar Icon actions.
 - **Tighter spacing.** A slider fits more icons in the same bar.
-- **Auto-hide** and launch at login.
+- **Launch at login.**
 
-Perch uses about 15 MB of memory and no CPU while idle. It reacts to events and never polls. It needs Accessibility to see and move icons; Screen Recording only if you turn on the drawer.
+Perch uses about 15 MB of memory and no CPU while idle. It reacts to events and never polls. It needs Accessibility to see and open icons; Screen Recording only for exact pictures.
 
 ## Using it
 
-- **Click** empty menu bar space (or Perch's line or icon): show or hide hidden icons, or open the drawer if it's on.
+- **Click** empty menu bar space (or Perch's line or icon): Perch's bar.
 - **Right-click** empty menu bar space: Arrange. Drag icons to reorder them. Settings and Quit are in its ⋯ menu.
 - **Spotlight**: "Arrange Menu Bar" opens Arrange too.
 - **⌘Space**, then an icon's name: open that icon's menu.
@@ -42,7 +43,7 @@ Perch isn't notarized yet. The first time you open a downloaded copy, right-clic
 
 macOS has no API for hiding another app's menu bar icon. Perch adds a divider item and, when hiding, stretches it thousands of points wide. Everything to its left is pushed off the screen. Shrinking the divider brings them back.
 
-Perch never touches your mouse. macOS keeps a saved position for every menu bar icon. To fit your screen, Perch moves only its own divider, which is instant. To move another app's icon, it saves the icon's new position and quietly restarts that app, holding the spot open so nothing jumps. Apps with windows open aren't restarted; their icon moves the next time they open. Accessibility tells Perch where each icon is. The drawer draws icons from pictures taken only while it's open.
+Perch never touches your mouse. macOS keeps a saved position for every menu bar icon. To fit your screen, Perch moves only its own divider, which is instant. To move another app's icon, it saves the icon's new position and quietly restarts that app, holding the spot open so nothing jumps. Apps with windows open aren't restarted; their icon moves the next time they open. Accessibility tells Perch where each icon is. A hidden icon sits off screen, so when Perch opens it, its menu opens off screen too. Perch reads that menu through Accessibility, closes it, and shows the same items as its own menu; picking one presses the real item. Icons that open a panel get the panel moved under Perch's bar.
 
 ## License
 

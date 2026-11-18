@@ -77,8 +77,7 @@ final class MenuBarController: NSObject, ObservableObject {
     var openArrange: (() -> Void)?
     /// Called once Perch's items are placed, and again after a reset.
     var onReady: (() -> Void)?
-    /// Handles a click on the bird instead of revealing, when the drawer is on.
-    /// Returns false to fall back to revealing in the menu bar.
+    /// Opens or closes Perch's bar. Returns false if it can't open (no Accessibility).
     var toggleDrawer: (() -> Bool)?
     /// Runs once at launch while everything is still showing, before the first hide.
     var beforeFirstHide: (() async -> Void)?
@@ -102,7 +101,6 @@ final class MenuBarController: NSObject, ObservableObject {
     private let log = Logger(subsystem: "com.georgebrothers.perch", category: "menubar")
     private var perchItem: NSStatusItem!
     private var hiddenDivider: NSStatusItem!
-    private var rehider: AutoRehider!
     private var cancellables = Set<AnyCancellable>()
     private var placementAttempts = 0
     private var hasReset = false
@@ -111,7 +109,6 @@ final class MenuBarController: NSObject, ObservableObject {
     init(preferences: Preferences) {
         self.preferences = preferences
         super.init()
-        rehider = AutoRehider(preferences: preferences) { [weak self] in self?.collapse() }
         removeRetiredItems()
         seedPositionsIfNeeded()
         createItems()
@@ -122,22 +119,18 @@ final class MenuBarController: NSObject, ObservableObject {
 
     // MARK: - Showing and hiding
 
-    func toggle() {
-        visibility.isRevealed ? collapse() : reveal()
-    }
-
-    func reveal(armAutoHide: Bool = true) {
+    /// Shows every icon in the bar. Perch does this only at launch, to picture
+    /// icons for its bar, and as a last resort for an icon it can't open otherwise.
+    func reveal() {
         stopMenuWatch()
         isTemporaryReveal = false
         visibility = .revealed
         apply()
-        if armAutoHide { rehider.arm() } else { rehider.disarm() }
     }
 
     func collapse() {
         stopMenuWatch()
         isTemporaryReveal = false
-        rehider.disarm()
         guard perchIsRightOfDivider() else {
             // The bird ended up on the hidden side, so hiding would hide Perch
             // itself. Put Perch back next to Control Center, once. If macOS
@@ -171,7 +164,6 @@ final class MenuBarController: NSObject, ObservableObject {
         if !visibility.isRevealed {
             visibility = .revealed
             apply()
-            rehider.disarm()
             isTemporaryReveal = true
         }
         pendingOpen += 1
@@ -269,7 +261,6 @@ final class MenuBarController: NSObject, ObservableObject {
 
     /// Puts Perch's items back next to Control Center, in the right order.
     func resetPositions() {
-        rehider.disarm()
         for item in [perchItem, hiddenDivider] {
             if let item { NSStatusBar.system.removeStatusItem(item) }
         }
@@ -390,6 +381,7 @@ final class MenuBarController: NSObject, ObservableObject {
                     "NSStatusItem VisibleCC PerchArchivedDivider",
                     "NSStatusItem Visible PerchArchivedDivider",
                     "archivedSectionEnabled", "clickAction", "hasSeenWelcome", "rehideOnAppSwitch",
+                    "autoRehideEnabled", "rehideDelay", "rehideOnClickOutside",
                     "searchEnabled", "searchKeyCode", "searchModifiers"] {
             defaults.removeObject(forKey: key)
         }
@@ -571,10 +563,14 @@ final class MenuBarController: NSObject, ObservableObject {
         }
     }
 
-    /// With the bar already showing everything, a click hides it again
-    /// rather than opening the drawer on top.
+    /// Opens or closes Perch's bar. If the menu bar is showing everything
+    /// (only right after launch), a click hides the extras instead.
     private func menuToggle() {
-        if visibility.isRevealed || toggleDrawer?() != true { toggle() }
+        if visibility.isRevealed {
+            collapse()
+        } else if toggleDrawer?() != true {
+            openArrange?()
+        }
     }
 
     // MARK: - Preferences
@@ -587,18 +583,5 @@ final class MenuBarController: NSObject, ObservableObject {
                 DispatchQueue.main.async { self?.updatePerchIcon() }
             }
             .store(in: &cancellables)
-
-        Publishers.Merge3(
-            preferences.$autoRehideEnabled.map { _ in () },
-            preferences.$rehideDelay.map { _ in () },
-            preferences.$rehideOnClickOutside.map { _ in () }
-        )
-        .dropFirst(3)
-        .debounce(for: .milliseconds(300), scheduler: RunLoop.main)
-        .sink { [weak self] in
-            guard let self, self.visibility.isRevealed else { return }
-            self.rehider.arm()
-        }
-        .store(in: &cancellables)
     }
 }

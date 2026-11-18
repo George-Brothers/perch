@@ -127,7 +127,7 @@ enum AX {
         return (value as! AXValue)
     }
 
-    private static func raw(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
+    static func raw(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success else { return nil }
         return value

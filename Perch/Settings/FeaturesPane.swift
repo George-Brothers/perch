@@ -16,8 +16,8 @@ struct FeaturesPane: View {
         Form {
             Section {
                 Toggle(isOn: drawerBinding) {
-                    Text("Hidden icons drawer")
-                    Text("Click Perch's menu bar icon and hidden icons drop down in a small bar under the menu bar. Needs Screen Recording; Perch asks only if you turn this on.")
+                    Text("Exact icon pictures")
+                    Text("Show hidden icons in Perch's bar as they look in the menu bar, instead of app icons. Needs Screen Recording; Perch asks only if you turn this on.")
                 }
                 if preferences.drawerEnabled && !permissions.hasScreenRecording {
                     LabeledContent {
@@ -27,7 +27,7 @@ struct FeaturesPane: View {
                         }
                     } label: {
                         Text("Waiting for Screen Recording")
-                        Text("Turn Perch on in Screen Recording, then restart Perch. Until then, hidden icons show in the menu bar.")
+                        Text("Turn Perch on in Screen Recording, then restart Perch. Until then, Perch's bar shows app icons.")
                     }
                 }
             }
@@ -122,12 +122,12 @@ private struct DrawerPermissionSheet: View {
             Image(systemName: "menubar.dock.rectangle")
                 .font(.system(size: 30, weight: .light))
                 .foregroundStyle(.tint)
-            Text("Allow Screen Recording for the drawer?")
+            Text("Allow Screen Recording for exact pictures?")
                 .font(.title3.weight(.semibold))
             VStack(alignment: .leading, spacing: 8) {
-                Text("To draw other apps' menu bar icons in the drawer, Perch needs Screen Recording permission.")
-                Text("Perch takes pictures of menu bar icons while they're on screen, so the drawer can show them later. The pictures stay in memory and are never saved or sent.")
-                Text("Don't want that? Leave the drawer off. Perch works the same without it and shows hidden icons in the menu bar instead.")
+                Text("To draw other apps' menu bar icons in Perch's bar exactly, Perch needs Screen Recording permission.")
+                Text("Perch takes pictures of menu bar icons while they're on screen, so its bar can show them later. The pictures stay in memory and are never saved or sent.")
+                Text("Don't want that? Leave this off. Perch works the same and shows app icons instead.")
                     .foregroundStyle(.secondary)
             }
             .fixedSize(horizontal: false, vertical: true)

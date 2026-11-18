@@ -1,8 +1,9 @@
 import AppKit
 import SwiftUI
 
-/// The drawer: hidden icons in a small bar that drops down from the bird.
-/// Nothing in the menu bar moves; the icons are pictures you can click.
+/// Perch's bar: every icon that's hidden or doesn't fit, in a small bar under
+/// the menu bar. Nothing in the menu bar moves. Clicking an icon opens its
+/// menu right there (see `MenuMirror`).
 @MainActor
 final class DrawerController {
     private let engine: LayoutEngine
@@ -16,8 +17,8 @@ final class DrawerController {
     /// Bumped on every open, so a fade-out that finishes late doesn't hide a reopened drawer.
     private var generation = 0
 
-    /// Opens the icon's own menu. Set by the app.
-    var onOpenItem: ((MenuBarItem) -> Void)?
+    /// Opens the icon's own menu with its top-left corner at the point. Set by the app.
+    var onOpenItem: ((MenuBarItem, NSPoint) -> Void)?
     var onOpenArrange: (() -> Void)?
 
     init(engine: LayoutEngine, images: IconImages, preferences: Preferences) {
@@ -91,8 +92,12 @@ final class DrawerController {
             images: images,
             preferences: preferences,
             onOpen: { [weak self] item in
-                self?.close()
-                self?.onOpenItem?(item)
+                guard let self else { return }
+                // The menu drops from the clicked icon, just under the bar.
+                let bottom = (self.panel?.frame.minY ?? 0) - 2
+                let point = NSPoint(x: NSEvent.mouseLocation.x - 12, y: bottom)
+                self.close()
+                self.onOpenItem?(item, point)
             },
             onArrange: { [weak self] in
                 self?.close()

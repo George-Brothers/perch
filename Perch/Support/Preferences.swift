@@ -75,9 +75,6 @@ final class Preferences: ObservableObject {
         static let iconStyle = "iconStyle"
         static let barItem = "barItem"
         static let priorities = "iconPriorities"
-        static let autoRehideEnabled = "autoRehideEnabled"
-        static let rehideDelay = "rehideDelay"
-        static let rehideOnClickOutside = "rehideOnClickOutside"
         static let drawerEnabled = "drawerEnabled"
     }
 
@@ -95,18 +92,9 @@ final class Preferences: ObservableObject {
     @Published private(set) var priorities: [String: IconPriority] {
         didSet { defaults.set(priorities.mapValues(\.rawValue), forKey: Key.priorities) }
     }
-    @Published var autoRehideEnabled: Bool {
-        didSet { defaults.set(autoRehideEnabled, forKey: Key.autoRehideEnabled) }
-    }
-    /// Seconds before revealed icons hide again.
-    @Published var rehideDelay: Double {
-        didSet { defaults.set(rehideDelay, forKey: Key.rehideDelay) }
-    }
-    @Published var rehideOnClickOutside: Bool {
-        didSet { defaults.set(rehideOnClickOutside, forKey: Key.rehideOnClickOutside) }
-    }
-    /// Show hidden icons in a drawer under the menu bar. Off by default
-    /// because it needs Screen Recording permission.
+    /// Picture hidden icons exactly as they look in the menu bar, instead of
+    /// showing app icons in Perch's bar. Off by default because it needs
+    /// Screen Recording. (Saved under its old name, "drawerEnabled".)
     @Published var drawerEnabled: Bool {
         didSet { defaults.set(drawerEnabled, forKey: Key.drawerEnabled) }
     }
@@ -116,18 +104,12 @@ final class Preferences: ObservableObject {
         defaults.register(defaults: [
             Key.iconStyle: PerchIconStyle.bird.rawValue,
             Key.barItem: PerchBarItem.none.rawValue,
-            Key.autoRehideEnabled: true,
-            Key.rehideDelay: 15.0,
-            Key.rehideOnClickOutside: true,
             Key.drawerEnabled: false,
         ])
         iconStyle = PerchIconStyle(rawValue: defaults.string(forKey: Key.iconStyle) ?? "") ?? .bird
         barItem = PerchBarItem(rawValue: defaults.string(forKey: Key.barItem) ?? "") ?? .none
         let stored = defaults.dictionary(forKey: Key.priorities) as? [String: String] ?? [:]
         priorities = stored.compactMapValues(IconPriority.init(stored:)).filter { $0.value == .hidden }
-        autoRehideEnabled = defaults.bool(forKey: Key.autoRehideEnabled)
-        rehideDelay = defaults.double(forKey: Key.rehideDelay)
-        rehideOnClickOutside = defaults.bool(forKey: Key.rehideOnClickOutside)
         drawerEnabled = defaults.bool(forKey: Key.drawerEnabled)
     }
 
