@@ -66,10 +66,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // that are on screen, so take them whenever the bar is showing everything.
         let captureVisible: () async -> Void = {
             // Skip while a menu is open: its icon would be pictured highlighted.
-            guard preferences.drawerEnabled, permissions.hasScreenRecording,
-                  !MenuBarGeometry.isMenuOpen() else { return }
+            guard preferences.drawerEnabled, permissions.hasScreenRecording else { return }
+            // Always rescan, so Arrange and Settings show current icons even with a menu open.
             let items = await engine.rescan()
-            // Checked again: the drawer may have been turned off during the scan.
+            // The drawer may have been turned off during the scan.
             guard preferences.drawerEnabled, !MenuBarGeometry.isMenuOpen() else { return }
             await images.capture(items.filter { $0.section != .notShowing && images.needsCapture($0) })
         }
