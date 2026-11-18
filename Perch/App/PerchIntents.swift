@@ -13,6 +13,17 @@ struct ShowHiddenIconsIntent: AppIntent {
     }
 }
 
+struct ArrangeIntent: AppIntent {
+    static let title: LocalizedStringResource = "Arrange Menu Bar"
+    static let description = IntentDescription("Opens Perch's Arrange panel to reorder and hide menu bar icons.")
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        AppDelegate.shared?.showArrange()
+        return .result()
+    }
+}
+
 struct OpenIconIntent: AppIntent {
     static let title: LocalizedStringResource = "Open Menu Bar Icon"
     static let description = IntentDescription("Opens a menu bar icon's menu, even when it's hidden.")
@@ -75,6 +86,12 @@ struct PerchShortcuts: AppShortcutsProvider {
             phrases: ["Show hidden icons in \(.applicationName)", "Show hidden menu bar icons with \(.applicationName)"],
             shortTitle: "Show Hidden Icons",
             systemImageName: "menubar.arrow.down.rectangle"
+        )
+        AppShortcut(
+            intent: ArrangeIntent(),
+            phrases: ["Arrange menu bar with \(.applicationName)", "Arrange icons in \(.applicationName)"],
+            shortTitle: "Arrange Menu Bar",
+            systemImageName: "arrow.left.and.right.square"
         )
         AppShortcut(
             intent: OpenIconIntent(),

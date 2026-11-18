@@ -9,10 +9,10 @@ A light menu bar manager for macOS. Perch hides the menu bar icons you don't nee
 ## What it does
 
 - **Click the bird to show or hide.** Hidden icons come back with one click and go away with another.
-- **Always show, Show when there's room, Hidden.** Drag each icon onto a shelf in the Arrange panel. Perch keeps the bar that way, moving icons for you when apps open or quit, a display changes or your Mac wakes.
+- **Put every icon where you want it.** Arrange shows your menu bar in order. Drag an icon to a new spot and Perch moves the real one there. Left of the line is hidden. Icons can also show only when there's room (right-click one).
 - **Drawer (optional).** Hidden icons drop down in a small bar under the menu bar, so nothing has to fit next to the notch. Needs Screen Recording, so it's off until you turn it on in Settings → Features.
 - **Spotlight.** Every menu bar icon shows up in Spotlight. Type its name and press Return to open its menu, even when it's hidden.
-- **Shortcuts.** Show Hidden Icons and Open Menu Bar Icon actions.
+- **Shortcuts.** Show Hidden Icons, Arrange Menu Bar and Open Menu Bar Icon actions.
 - **Tighter spacing.** A slider fits more icons in the same bar.
 - **Auto-hide**, launch at login and a choice of menu bar icon.
 
@@ -21,8 +21,8 @@ Perch uses about 15 MB of memory and no CPU while idle. It reacts to events and 
 ## Using it
 
 - **Click** the bird: show or hide hidden icons (or open the drawer, if it's on).
-- **Option-click** the bird: Arrange. Drag icons between shelves.
-- **Right-click** the bird: Arrange, Settings, Quit.
+- **Right-click** the bird: Arrange. Drag icons to reorder them. Settings and Quit are in its ⋯ menu.
+- **Spotlight**: "Arrange Menu Bar" opens Arrange too.
 - **⌘Space**, then an icon's name: open that icon's menu.
 
 ## Build

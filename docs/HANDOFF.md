@@ -15,6 +15,7 @@
 9. `perch-polish`: visual pass, docs, council fixes.
 10. `perch-compact`: smaller Perch icon.
 11. `perch-spotlight-icons`: icons in Spotlight; search panel and hotkey removed.
+12. `perch-arrange-order`: Arrange as one ordered bar; drag to any spot; right-click opens it.
 
 ## macOS 26 facts
 - Every status item window is owned by Control Center (layer 25); AX per app gives identity (AXExtrasMenuBar).

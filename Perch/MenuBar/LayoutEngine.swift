@@ -49,6 +49,23 @@ final class LayoutEngine: ObservableObject {
         preferences.setPriority(priority, for: item.key)
     }
 
+    /// Exact spots asked for in Arrange, done by the next pass.
+    private var placements: [String: Placement] = [:]
+
+    /// Moves an icon to an exact spot (from Arrange) and gives it `priority`.
+    func place(_ item: MenuBarItem, _ placement: Placement, priority: IconPriority) {
+        placements[item.key] = placement
+        stuck[item.key] = nil
+        if preferences.priority(for: item.key) != priority {
+            preferences.setPriority(priority, for: item.key) // schedules a pass
+        } else {
+            scheduleArrange(after: 0.05)
+        }
+    }
+
+    /// Perch's own x position, so Arrange can show where it sits among the icons.
+    @Published private(set) var perchMinX: CGFloat?
+
     /// Rescans so the Arrange list is current. Cheap; runs when the list opens.
     func refresh() {
         Task { await scan() }
@@ -94,6 +111,7 @@ final class LayoutEngine: ObservableObject {
             }
             return item
         }
+        perchMinX = menuBar.perchFrame()?.minX
         hasScanned = true
         return items
     }
@@ -102,7 +120,31 @@ final class LayoutEngine: ObservableObject {
 
     private struct Move {
         let item: MenuBarItem
-        let show: Bool
+        let target: Placement
+
+        /// Whether the icon should end up right of the divider.
+        var show: Bool {
+            switch target {
+            case .hidden, .before(_, shown: false): false
+            case .shown, .before(_, shown: true): true
+            }
+        }
+    }
+
+    /// Where an icon goes in the bar.
+    enum Placement: Equatable {
+        /// Right of the divider, at its left end.
+        case shown
+        /// Left of the divider, at its right end.
+        case hidden
+        /// Just left of another icon, the divider or Perch, ending up shown or hidden.
+        case before(Anchor, shown: Bool)
+    }
+
+    enum Anchor: Equatable {
+        case icon(String)
+        case divider
+        case perch
     }
 
     /// Tries again in 2 s, up to five times; the next trigger starts over.
@@ -148,6 +190,7 @@ final class LayoutEngine: ObservableObject {
             return
         }
         deferrals = 0
+        placements.removeAll()
         log.notice("arranging: \(moves.count) move(s)")
 
         let generation = stuckGeneration
@@ -170,9 +213,10 @@ final class LayoutEngine: ObservableObject {
             attempted.append(move)
             guard let divider = menuBar.dividerFrame(),
                   let from = AX.frame(of: move.item.element),
-                  MenuBarGeometry.isOnScreen(from, screen: menuBar.screen)
+                  MenuBarGeometry.isOnScreen(from, screen: menuBar.screen),
+                  let targetX = targetX(for: move.target, divider: divider, in: current)
             else { continue }
-            let target = CGPoint(x: move.show ? divider.maxX + 3 : divider.minX - 3, y: from.midY)
+            let target = CGPoint(x: targetX, y: from.midY)
             let start = CGPoint(x: from.midX, y: from.midY)
             await Task.detached(priority: .userInitiated) {
                 IconMover.drag(from: start, to: target)
@@ -199,6 +243,22 @@ final class LayoutEngine: ObservableObject {
                 log.notice("\(move.item.displayName, privacy: .public) didn't move; skipping it for now")
                 stuck[move.item.key] = now.frame.minX
             }
+        }
+    }
+
+    /// Where to drop an icon. macOS puts a ⌘-dragged icon before whichever icon
+    /// it's dropped on the left half of, so aim just inside the anchor's left edge.
+    private func targetX(for placement: Placement, divider: CGRect, in items: [MenuBarItem]) -> CGFloat? {
+        switch placement {
+        case .shown: return divider.maxX + 3
+        case .hidden, .before(.divider, _): return divider.minX - 3
+        case .before(.perch, _): return menuBar.perchFrame().map { $0.minX + 2 }
+        case .before(.icon(let key), _):
+            guard let anchor = items.first(where: { $0.key == key }),
+                  let frame = AX.frame(of: anchor.element),
+                  MenuBarGeometry.isOnScreen(frame, screen: menuBar.screen)
+            else { return nil }
+            return frame.minX + min(2, frame.width / 4)
         }
     }
 
@@ -250,16 +310,23 @@ final class LayoutEngine: ObservableObject {
             room -= item.frame.width
         }
 
+        // Spots asked for in Arrange go first; they also settle the icon's side.
+        let placed = inBar.filter(\.isMovable).compactMap { item in
+            placements[item.key].map { Move(item: item, target: $0) }
+        }
+        let placedKeys = Set(placed.map(\.item.key))
+
         let moves = movable.compactMap { item -> Move? in
+            guard !placedKeys.contains(item.key) else { return nil }
             let shouldShow = wantShown.contains(item.key)
             let isShown = item.section == .shown
-            return shouldShow == isShown ? nil : Move(item: item, show: shouldShow)
+            return shouldShow == isShown ? nil : Move(item: item, target: shouldShow ? .shown : .hidden)
         }
         // Hides first, to make room. Then shows, nearest the divider first, so
         // each one pulls the next hidden icon out from behind the notch.
         let hides = moves.filter { !$0.show }
         let shows = moves.filter(\.show).sorted { $0.item.frame.minX > $1.item.frame.minX }
-        return hides + shows
+        return hides + placed + shows
     }
 
     // MARK: - Triggers

@@ -52,8 +52,6 @@ final class MenuBarController: NSObject, ObservableObject {
     var toggleDrawer: (() -> Bool)?
     /// Runs once at launch while everything is still showing, before the first hide.
     var beforeFirstHide: (() async -> Void)?
-    /// Whether the bird opens the drawer rather than showing icons in the bar.
-    var usesDrawer: () -> Bool = { false }
 
     var perchButton: NSStatusBarButton? { perchItem.button }
 
@@ -246,7 +244,7 @@ final class MenuBarController: NSObject, ObservableObject {
             button.action = #selector(perchClicked(_:))
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
             button.setAccessibilityLabel("Perch")
-            button.toolTip = "Click to show or hide icons. Right-click for more."
+            button.toolTip = "Click to show or hide icons. Right-click to arrange."
         }
 
         hiddenDivider = bar.statusItem(withLength: Self.dividerLength)
@@ -365,11 +363,12 @@ final class MenuBarController: NSObject, ObservableObject {
 
     // MARK: - Clicks and menu
 
+    /// Click: show or hide icons (or the drawer). Right-click, Control-click
+    /// or Option-click: Arrange, which also holds Settings and Quit.
     @objc private func perchClicked(_ sender: NSStatusBarButton) {
         let event = NSApp.currentEvent
-        if event?.type == .rightMouseUp || event?.modifierFlags.contains(.control) == true {
-            showMenu()
-        } else if event?.modifierFlags.contains(.option) == true {
+        if event?.type == .rightMouseUp || event?.modifierFlags.contains(.control) == true
+            || event?.modifierFlags.contains(.option) == true {
             openArrange?(perchItem.button)
         } else {
             menuToggle()
@@ -381,29 +380,11 @@ final class MenuBarController: NSObject, ObservableObject {
         collapse()
     }
 
-    private func showMenu() {
-        let menu = NSMenu()
-        let toggleTitle = visibility.isRevealed ? "Hide Icons" : (usesDrawer() ? "Show Drawer" : "Show Hidden Icons")
-        menu.addItem(withTitle: toggleTitle, action: #selector(menuToggle), keyEquivalent: "").target = self
-        menu.addItem(withTitle: "Arrange Icons…", action: #selector(menuArrange), keyEquivalent: "").target = self
-        menu.addItem(.separator())
-        menu.addItem(withTitle: "Settings…", action: #selector(menuSettings), keyEquivalent: ",").target = self
-        menu.addItem(.separator())
-        menu.addItem(withTitle: "Quit Perch", action: #selector(menuQuit), keyEquivalent: "q").target = self
-
-        perchItem.menu = menu
-        perchItem.button?.performClick(nil)
-        perchItem.menu = nil
-    }
-
     /// With the bar already showing everything, a click hides it again
     /// rather than opening the drawer on top.
-    @objc private func menuToggle() {
+    private func menuToggle() {
         if visibility.isRevealed || toggleDrawer?() != true { toggle() }
     }
-    @objc private func menuArrange() { openArrange?(perchItem.button) }
-    @objc private func menuSettings() { openSettings?(nil) }
-    @objc private func menuQuit() { NSApp.terminate(nil) }
 
     // MARK: - Preferences
 
