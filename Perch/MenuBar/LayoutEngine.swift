@@ -69,6 +69,7 @@ final class LayoutEngine: ObservableObject {
 
     /// Perch's own x position, so Arrange can show where it sits among the icons.
     @Published private(set) var perchMinX: CGFloat?
+    @Published private(set) var perchWidth: CGFloat?
 
     /// Rescans so the Arrange list is current. Cheap; runs when the list opens.
     func refresh() {
@@ -113,6 +114,7 @@ final class LayoutEngine: ObservableObject {
             return item
         }
         perchMinX = menuBar.perchFrame()?.minX
+        perchWidth = menuBar.perchFrame()?.width
         hasScanned = true
         return items
     }
@@ -138,6 +140,15 @@ final class LayoutEngine: ObservableObject {
         /// The right end of the icons, just before the clock and Control Center.
         case end
     }
+
+    /// Room for icons in the bar on this screen, in points, so Arrange can
+    /// draw the bar at its real size and end where the screen does.
+    @Published private(set) var room: CGFloat?
+    /// The room a MacBook's own screen would have, when you're on another
+    /// display. Learned the last time Perch saw the built-in screen.
+    @Published private(set) var laptopRoom: CGFloat?
+    /// The space between icons in the bar.
+    @Published private(set) var iconGap: CGFloat = 8
 
     /// Apps whose icon has a new spot saved but which weren't restarted, because
     /// restarting them could interrupt you (they have windows). Bundle ID → name.
@@ -367,6 +378,7 @@ final class LayoutEngine: ObservableObject {
             .filter { !$0.isMovable && !$0.isFixed && $0.section == .shown }
             .reduce(0) { $0 + $1.frame.width + gap }
         var room = rightBound - leftBound - reserved - 8
+        publishRoom(room, screen: screen, rightBound: rightBound, reserved: reserved, gap: gap)
 
         // Walk right to left; `cut` ends up at the leftmost entry that stays shown.
         let movable = list.filter { $0.kind != .fixed }
@@ -402,6 +414,26 @@ final class LayoutEngine: ObservableObject {
         let shownCount = list[cut...].filter { $0.kind != .fixed }.count
         log.notice("moving the divider so \(shownCount, privacy: .public) icons show")
         menuBar.moveDivider(to: position)
+    }
+
+    private static let laptopWidthKey = "laptopBarWidth"
+
+    /// Publishes the room on this screen and, on another display, the room
+    /// a MacBook's screen would have (the part right of its notch, minus the
+    /// same clock and Control Center).
+    private func publishRoom(_ room: CGFloat, screen: NSScreen, rightBound: CGFloat, reserved: CGFloat, gap: CGFloat) {
+        if self.room != room { self.room = room }
+        if iconGap != gap { iconGap = gap }
+        let defaults = UserDefaults.standard
+        if let builtIn = NSScreen.screens.first(where: \.isBuiltIn) {
+            let left = builtIn.auxiliaryTopRightArea?.minX ?? builtIn.frame.midX
+            defaults.set(Double(builtIn.frame.maxX - left), forKey: Self.laptopWidthKey)
+        }
+        var laptop: CGFloat?
+        if !screen.isBuiltIn, let width = defaults.object(forKey: Self.laptopWidthKey) as? Double {
+            laptop = CGFloat(width) - (screen.frame.maxX - rightBound) - reserved - 8
+        }
+        if laptopRoom != laptop { laptopRoom = laptop }
     }
 
     /// The space macOS leaves between neighboring icons, from the bar itself.
@@ -482,5 +514,13 @@ final class LayoutEngine: ObservableObject {
                 }
             })
         }
+    }
+}
+
+extension NSScreen {
+    /// A MacBook's own screen.
+    var isBuiltIn: Bool {
+        guard let number = deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { return false }
+        return CGDisplayIsBuiltin(number.uint32Value) != 0
     }
 }
