@@ -40,6 +40,7 @@ struct OpenIconIntent: AppIntent {
         switch await AppDelegate.shared?.openIcon(key: icon.id) {
         case .opened: return .result()
         case .busy: throw OpenFailed.busy
+        case .noPermission: throw OpenFailed.noPermission
         case .gone, nil: throw OpenFailed.gone
         }
     }
@@ -106,11 +107,14 @@ private enum OpenFailed: Error, CustomLocalizedStringResourceConvertible {
     case gone
     /// Perch is moving icons right now.
     case busy
+    /// Perch hasn't been allowed Accessibility yet.
+    case noPermission
 
     var localizedStringResource: LocalizedStringResource {
         switch self {
         case .gone: "That icon isn't in the menu bar anymore."
         case .busy: "Perch is arranging icons. Try again in a moment."
+        case .noPermission: "Perch needs Accessibility permission. Open Perch to allow it."
         }
     }
 }

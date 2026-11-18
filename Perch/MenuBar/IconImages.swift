@@ -46,7 +46,10 @@ final class IconImages: ObservableObject {
         themeObserver = DistributedNotificationCenter.default().addObserver(
             forName: Notification.Name("AppleInterfaceThemeChangedNotification"), object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.captured.removeAll() }
+            MainActor.assumeIsolated {
+                self?.themeCount += 1
+                self?.captured.removeAll()
+            }
         }
     }
 
@@ -57,6 +60,8 @@ final class IconImages: ObservableObject {
 
     /// Bumped by `clear()`, so a capture already running can't bring pictures back.
     private var clearCount = 0
+    /// Bumped on each Light/Dark switch.
+    private var themeCount = 0
 
     func clear() {
         clearCount += 1
@@ -69,6 +74,7 @@ final class IconImages: ObservableObject {
     func capture(_ items: [MenuBarItem]) async {
         guard !items.isEmpty, !isCapturing, CGPreflightScreenCaptureAccess() else { return }
         let session = clearCount
+        let theme = themeCount
         isCapturing = true
         defer { isCapturing = false }
 
@@ -125,14 +131,16 @@ final class IconImages: ObservableObject {
             log.notice("no icons captured")
             return
         }
+        // Turned the drawer off meanwhile: drop what came back.
+        guard session == clearCount else { return }
+        // Light/Dark mode changed meanwhile: keep the pictures, but retake them next time.
+        let fresh = theme == themeCount
         var updated = images
         let now = Date()
         for (key, image) in pictures {
             updated[key] = image
-            captured[key] = (now, widths[key] ?? image.size.width)
+            if fresh { captured[key] = (now, widths[key] ?? image.size.width) }
         }
-        // Turned the drawer off meanwhile: drop what came back.
-        guard session == clearCount else { return }
         images = updated
         // Judge from every picture, so one colorful new icon can't flip the look.
         iconsAreLight = Self.averageLuminance(of: Array(updated.values)) > 0.6
@@ -142,7 +150,7 @@ final class IconImages: ObservableObject {
     private static func averageLuminance(of images: [NSImage]) -> Double {
         var total = 0.0
         var weight = 0.0
-        for image in images.prefix(8) {
+        for image in images {
             guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
                   let rep = Optional(NSBitmapImageRep(cgImage: cg))
             else { continue }

@@ -217,11 +217,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Opens the icon with this key.
     func openIcon(key: String) async -> OpenResult {
+        guard Permissions.shared.hasAccessibility else { return .noPermission }
         guard let item = await icons().first(where: { $0.key == key }) else { return .gone }
         return open(item) ? .opened : .busy
     }
 
-    enum OpenResult { case opened, gone, busy }
+    enum OpenResult { case opened, gone, busy, noPermission }
 
     /// Opens an icon's menu. A hidden icon comes out just until its menu closes.
     /// False when Perch is busy arranging.
