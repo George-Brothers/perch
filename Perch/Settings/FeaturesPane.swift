@@ -10,6 +10,7 @@ struct FeaturesPane: View {
     @State private var appliedSpacing = MenuBarSpacing.current
     @State private var confirmingReopen = false
     @State private var appsToReopen: [NSRunningApplication] = []
+    @State private var preparingReopen = false
 
     var body: some View {
         Form {
@@ -64,13 +65,16 @@ struct FeaturesPane: View {
                 SpacingPreview(spacing: CGFloat(spacing.rounded()))
                 LabeledContent("Reopens apps with menu bar icons") {
                     Button("Apply…") {
+                        preparingReopen = true
                         Task {
+                            defer { preparingReopen = false }
                             // The list you confirm is exactly the list Perch reopens.
                             appsToReopen = MenuBarSpacing.appsToReopen(await engine.rescan())
                             confirmingReopen = true
                         }
                     }
-                        .disabled(Int(spacing.rounded()) == appliedSpacing || MenuBarSpacing.isApplying)
+                        .disabled(Int(spacing.rounded()) == appliedSpacing || MenuBarSpacing.isApplying
+                                  || preparingReopen || confirmingReopen)
                 }
             }
         }

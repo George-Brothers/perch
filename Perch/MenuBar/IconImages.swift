@@ -85,6 +85,8 @@ final class IconImages: ObservableObject {
             log.error("couldn't list windows: \(error.localizedDescription, privacy: .public)")
             return
         }
+        // Turned the drawer off while windows were listed: take no pictures.
+        guard session == clearCount else { return }
         let statusLevel = Int(CGWindowLevelForKey(.statusWindow))
         let barWindows = content.windows.filter { $0.windowLayer == statusLevel }
 

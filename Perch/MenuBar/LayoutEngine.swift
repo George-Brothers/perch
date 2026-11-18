@@ -105,6 +105,17 @@ final class LayoutEngine: ObservableObject {
         let show: Bool
     }
 
+    /// Tries again in 2 s, up to five times; the next trigger starts over.
+    private func deferOrGiveUp() {
+        deferrals += 1
+        if deferrals <= 5 {
+            scheduleArrange(after: 2)
+        } else {
+            log.notice("a menu stayed open; skipping this pass")
+            deferrals = 0
+        }
+    }
+
     private func arrange() async {
         guard !isArranging else {
             arrangeAgain = true
@@ -115,16 +126,9 @@ final class LayoutEngine: ObservableObject {
         // Don't fight the user: wait while a menu is open or a mouse button is
         // down. Give up after a few tries; the next trigger tries again.
         if Self.userIsBusy() {
-            deferrals += 1
-            if deferrals <= 5 {
-                scheduleArrange(after: 2)
-            } else {
-                log.notice("a menu stayed open; skipping this pass")
-                deferrals = 0
-            }
+            deferOrGiveUp()
             return
         }
-        deferrals = 0
         isArranging = true
         defer {
             isArranging = false
@@ -138,6 +142,12 @@ final class LayoutEngine: ObservableObject {
         let current = await scan()
         let moves = plan(for: current)
         guard !moves.isEmpty else { return }
+        // Something opened during the scan (an icon from the drawer, say): try later.
+        if Self.userIsBusy() || menuBar.isTemporaryReveal {
+            deferOrGiveUp()
+            return
+        }
+        deferrals = 0
         log.notice("arranging: \(moves.count) move(s)")
 
         let generation = stuckGeneration
