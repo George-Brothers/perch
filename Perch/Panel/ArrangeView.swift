@@ -41,7 +41,7 @@ struct ArrangeShelves: View {
     /// Icons in menu bar order, left to right, like the bar itself.
     private func items(for priority: IconPriority) -> [MenuBarItem] {
         engine.items
-            .filter { $0.section != .notShowing && preferences.priority(for: $0.key) == priority }
+            .filter { $0.section != .notShowing && $0.isMovable && preferences.priority(for: $0.key) == priority }
             .sorted { $0.frame.minX < $1.frame.minX }
     }
 

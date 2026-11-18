@@ -33,8 +33,6 @@ final class LayoutEngine: ObservableObject {
     /// The display layout at the last display-change trigger.
     private var lastScreenFrames: [CGRect] = NSScreen.screens.map(\.frame)
 
-    /// Apple's in-use indicator (the orange mic pill) can't be moved.
-    private static let unmovableIdentifiers: Set<String> = ["com.apple.menuextra.audiovideo"]
 
     init(preferences: Preferences, permissions: Permissions, menuBar: MenuBarController) {
         self.preferences = preferences
@@ -210,7 +208,7 @@ final class LayoutEngine: ObservableObject {
         guard let perch = menuBar.perchFrame(), let screen = menuBar.screen else { return [] }
         let inBar = items.filter { $0.isInMenuBar }
         let movable = inBar.filter { item in
-            if Self.unmovableIdentifiers.contains(item.identifier ?? "") { return false }
+            if !item.isMovable { return false }
             if let x = stuck[item.key], abs(x - item.frame.minX) < 1 { return false }
             return true
         }

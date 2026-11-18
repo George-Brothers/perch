@@ -29,6 +29,16 @@ struct MenuBarItem: Identifiable {
     /// Stable name for saving this icon's priority across launches.
     var key: String { id }
 
+    /// A Live Activity (an app's temporary status, like a download or a timer).
+    /// macOS places these itself and they come and go.
+    var isLiveActivity: Bool { identifier?.hasSuffix(".liveActivity") == true }
+
+    /// Whether Perch can ⌘-drag this icon. The mic/camera indicator and Live
+    /// Activities are placed by macOS and won't move.
+    var isMovable: Bool {
+        !isLiveActivity && identifier != "com.apple.menuextra.audiovideo"
+    }
+
     var displayName: String {
         if let identifier, let name = Self.systemNames[identifier] { return name }
         if bundleID == "com.apple.controlcenter" || bundleID == "com.apple.systemuiserver",
