@@ -364,17 +364,42 @@ final class LayoutEngine: ObservableObject {
     private func apply(_ requests: [String: Placement], perch perchRequest: Placement?, in items: [MenuBarItem]) async {
         let list = entries(for: items)
         var moves: [Move] = []
+        var writes: [(slot: StatusItemPositions.Slot, value: Double, name: String)] = []
+        notice = nil
 
         for (key, placement) in requests {
             guard case .before(let anchor, let shown) = placement,
                   let item = items.first(where: { $0.key == key }), item.isMovable,
-                  let slot = slots[key], let index = list.firstIndex(where: { $0.kind == .icon(key) })
+                  let index = list.firstIndex(where: { $0.kind == .icon(key) })
             else {
                 log.notice("can't save a spot for \(key, privacy: .public)")
                 continue
             }
             let instant = shown ? showsInPlace(at: index, isShown: item.section != .hidden, before: anchor, in: list)
                                 : hidesInPlace(at: index, in: list)
+            let others = list.filter { $0.kind != .icon(key) }
+            let neighbor = anchorIndex(anchor, in: others).map { others[$0].kind }
+
+            // An app whose settings Perch can't change (a sandboxed app keeps
+            // them where macOS asks the user before every change): leave its
+            // icon where it is and move the icons around it instead.
+            guard let slot = slots[key], !slot.isPrivate else {
+                if instant {
+                    log.notice("\(item.displayName, privacy: .public): only the divider moves")
+                    continue
+                }
+                guard let around = movesAround(key, shown: shown, anchor: anchor, in: list) else {
+                    log.notice("can't move the icons around \(item.displayName, privacy: .public)")
+                    preferences.setPriority(shown ? .hidden : .shown, for: key)
+                    notice = "Perch can't move \(item.displayName) there. ⌘-drag it in the menu bar instead."
+                    continue
+                }
+                log.notice("moving \(around.count, privacy: .public) icons around \(item.displayName, privacy: .public)")
+                writes += around
+                moves.append(Move(key: key, shown: shown, neighbor: neighbor, waiting: nil))
+                continue
+            }
+
             let previous = pendingMoves[key].map(\.previous) ?? slot.value
             let target: Double?
             if instant {
@@ -398,21 +423,23 @@ final class LayoutEngine: ObservableObject {
                 log.notice("\(item.displayName, privacy: .public) is already there")
                 continue
             }
-            guard await StatusItemPositions.write(target, for: slot, within: 1) else {
-                log.notice("couldn't save a spot for \(item.displayName, privacy: .public) in time")
-                continue
-            }
-            log.notice("saved a new spot for \(item.displayName, privacy: .public)")
+            writes.append((slot, target, item.displayName))
             guard !instant else { continue }
-            let others = list.filter { $0.kind != .icon(key) }
             let app = NSRunningApplication(processIdentifier: item.pid)
             moves.append(Move(
-                key: key, shown: shown,
-                neighbor: anchorIndex(anchor, in: others).map { others[$0].kind },
+                key: key, shown: shown, neighbor: neighbor,
                 waiting: app?.bundleIdentifier.map {
                     PendingMove(bundleID: $0, name: app?.localizedName ?? item.displayName, hides: !shown, previous: previous)
                 }
             ))
+        }
+
+        for write in writes {
+            if await StatusItemPositions.write(write.value, for: write.slot, within: 1) {
+                log.notice("saved a new spot for \(write.name, privacy: .public)")
+            } else {
+                log.notice("couldn't save a spot for \(write.name, privacy: .public) in time")
+            }
         }
 
         if let perchRequest, let position = position(for: perchRequest, moving: .perch, in: items) {
@@ -426,17 +453,103 @@ final class LayoutEngine: ObservableObject {
         // Control Center put every icon at its saved spot, including any
         // earlier moves that were waiting.
         let landed = entries(for: after)
-        let dividerX = menuBar.dividerFrame()?.maxX ?? -.infinity
         var stillWaiting: [String: PendingMove] = [:]
+        var failed: [String] = []
         for move in moves {
             guard let index = landed.firstIndex(where: { $0.kind == .icon(move.key) }) else { continue }
             let inPlace = move.shown
                 ? index + 1 < landed.count && landed[index + 1].kind == move.neighbor
-                : landed[index].x < dividerX
-            if !inPlace, let waiting = move.waiting { stillWaiting[move.key] = waiting }
+                : !landed[..<index].contains(where: blocksHiding)
+            guard !inPlace else { continue }
+            if let waiting = move.waiting {
+                stillWaiting[move.key] = waiting
+            } else {
+                failed.append(move.key)
+                // Don't leave it marked hidden in the middle of the shown icons.
+                if !move.shown { preferences.setPriority(.shown, for: move.key) }
+            }
         }
         if pendingMoves != stillWaiting { pendingMoves = stillWaiting }
-        log.notice("restarted Control Center: \(moves.count - stillWaiting.count, privacy: .public) of \(moves.count, privacy: .public) icons moved")
+        if let first = failed.first, let name = after.first(where: { $0.key == first })?.displayName {
+            notice = "Perch couldn't move \(name) there. ⌘-drag it in the menu bar instead."
+        }
+        log.notice("restarted Control Center: \(moves.count - stillWaiting.count - failed.count, privacy: .public) of \(moves.count, privacy: .public) icons moved")
+    }
+
+    /// Something to tell you in Arrange about the last move, if it didn't work.
+    @Published private(set) var notice: String?
+
+    /// New spots for the icons around `key` that put it where you asked
+    /// without moving it. Its own position is unknown, so each spot hugs a
+    /// neighbor whose position Perch knows. Nil if that isn't possible (a
+    /// neighbor that has to move is private too, or Perch's own item is in the way).
+    private func movesAround(_ key: String, shown: Bool, anchor: Anchor,
+                             in list: [Entry]) -> [(slot: StatusItemPositions.Slot, value: Double, name: String)]? {
+        guard let index = list.firstIndex(where: { $0.kind == .icon(key) }) else { return nil }
+        var result: [(slot: StatusItemPositions.Slot, value: Double, name: String)] = []
+        let dividerX = menuBar.dividerFrame()?.maxX ?? -.infinity
+        func name(_ entry: Entry) -> String {
+            switch entry.kind {
+            case .icon(let other): return items.first { $0.key == other }?.displayName ?? other
+            case .perch: return "Perch"
+            case .fixed: return "the clock"
+            }
+        }
+        /// Saves new spots for `group`, left to right (falling values).
+        func save(_ group: [Entry], values: (Int) -> Double) -> Bool {
+            for (n, entry) in group.enumerated() {
+                guard case .icon(let other) = entry.kind, let slot = slots[other], !slot.isPrivate else {
+                    log.notice("can't move \(name(entry), privacy: .public) either")
+                    return false
+                }
+                result.append((slot, values(n), name(entry)))
+            }
+            return true
+        }
+        /// Spots just inside the gap next to `edge`, within 0.05 of its position.
+        func hug(_ group: [Entry], _ edge: Entry, fromLeft: Bool) -> Bool {
+            guard !group.isEmpty else { return true }
+            guard !edge.isGuess, let value = edge.position else {
+                log.notice("\(name(edge), privacy: .public) has no known spot to move next to")
+                return false
+            }
+            let count = Double(group.count + 1)
+            return save(group) { n in
+                let step = 0.05 * Double(fromLeft ? n + 1 : group.count - n) / count
+                return fromLeft ? value - step : value + step
+            }
+        }
+        // Left of everything Perch knows: well past the largest known spot.
+        let farLeft = (list.compactMap { $0.isGuess ? nil : $0.position }.max() ?? 0) + 1000
+
+        if shown {
+            // Everything between it and where it's going moves to its left.
+            // Hidden icons go to the far left, where they stay hidden; the
+            // shown ones go just right of its left neighbor, so the divider
+            // can sit between the two.
+            let rest = list.filter { $0.kind != .icon(key) }
+            let target = anchor == .divider ? index : anchorIndex(anchor, in: rest)
+            guard let target, target >= index else {
+                log.notice("\(name(list[index]), privacy: .public) is right of where it's going")
+                return nil
+            }
+            let passing = Array(rest[index..<target])
+            let hidden = passing.filter { $0.x < dividerX }
+            let showing = passing.filter { $0.x >= dividerX }
+            guard save(hidden, values: { farLeft + Double(hidden.count - $0) }) else { return nil }
+            if index > 0 {
+                guard hug(showing, list[index - 1], fromLeft: true) else { return nil }
+            } else {
+                // Nothing on its left: the shown ones go far left too, right of the hidden ones.
+                guard save(showing, values: { farLeft - 500 + Double(showing.count - $0) }) else { return nil }
+            }
+        } else {
+            // The shown icons on its left move to its right, keeping their order.
+            let showing = list[..<index].filter(blocksHiding)
+            guard index + 1 < list.count else { return nil }
+            guard hug(showing, list[index + 1], fromLeft: false) else { return nil }
+        }
+        return result
     }
 
     /// Whether the icon at `index` hides with just the divider: no icon meant
@@ -444,10 +557,15 @@ final class LayoutEngine: ObservableObject {
     /// now: an icon can be hidden today only because one next to it is, or
     /// because there's no room, and moving the divider would take those along.
     private func hidesInPlace(at index: Int, in list: [Entry]) -> Bool {
-        !list[..<index].contains { entry in
-            guard case .icon(let key) = entry.kind else { return false }
-            return preferences.priority(for: key) == .shown
-        }
+        !list[..<index].contains(where: blocksHiding)
+    }
+
+    /// An icon left of one you're hiding that would be hidden along with it:
+    /// meant to show, and showing now. (One that's already hidden, like a
+    /// new app's icon macOS put at the far left, isn't in the way.)
+    private func blocksHiding(_ entry: Entry) -> Bool {
+        guard case .icon(let key) = entry.kind, entry.x > (menuBar.dividerFrame()?.maxX ?? -.infinity) else { return false }
+        return preferences.priority(for: key) == .shown && pendingMoves[key]?.hides != true
     }
 
     /// Whether the icon at `index` shows at `anchor` with just the divider: it's
@@ -471,7 +589,7 @@ final class LayoutEngine: ObservableObject {
     private func positionJustHidden(_ key: String, in list: [Entry]) -> Double? {
         let others = list.filter { $0.kind != .icon(key) }
         guard let first = others.firstIndex(where: { entry in
-            if case .icon(let other) = entry.kind { return preferences.priority(for: other) == .shown }
+            if case .icon = entry.kind { return blocksHiding(entry) }
             return true // Perch's item, or the clock and Control Center
         }) else { return nil }
         return Self.between(first > 0 ? others[first - 1] : nil, others[first])

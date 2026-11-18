@@ -97,6 +97,14 @@ struct ArrangeBar: View {
                 .onPreferenceChange(ContentWidth.self) { contentWidth = $0 }
                 .animation(.snappy(duration: 0.18), value: rows)
 
+                if let notice = engine.notice {
+                    Text(notice)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(width: rowWidth + labelWidth, alignment: .leading)
+                }
+
                 if !waitingApps.isEmpty {
                     Text("\(waitingApps.formatted(.list(type: .and))) will move the next time \(waitingApps.count == 1 ? "it opens" : "they open"). To move \(waitingApps.count == 1 ? "it" : "them") now, ⌘-drag in the menu bar.")
                         .font(.system(size: 11))
@@ -317,7 +325,7 @@ struct ArrangeBar: View {
         guard let row, final != drag.original,
               let index = final[row]?.firstIndex(of: drag.slot)
         else {
-            arrangeLog.notice("drop ignored: \(row == nil ? "no row" : "same spot", privacy: .public)")
+            arrangeLog.notice("drop ignored: \(row == nil ? "no row" : "same spot", privacy: .public) (from \(drag.from.title, privacy: .public), over \(row?.title ?? "none", privacy: .public) at \(Int(drag.location.x), privacy: .public),\(Int(drag.location.y), privacy: .public); rows \(drag.rowFrames.map { "\($0.key.title) y\(Int($0.value.minY))-\(Int($0.value.maxY))" }.sorted().joined(separator: " "), privacy: .public))")
             return
         }
 
