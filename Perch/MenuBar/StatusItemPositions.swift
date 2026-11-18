@@ -77,9 +77,23 @@ enum StatusItemPositions {
         return result
     }
 
-    /// Writes off the main thread. False if macOS didn't save it or it didn't
-    /// finish within `limit`.
+    /// Every write and undo runs here, one at a time, so an undo always lands
+    /// after a write that was slow to finish, never before it.
+    private static let queue = DispatchQueue(label: "com.georgebrothers.perch.positions", qos: .userInitiated)
+
+    /// Saves a new spot off the main thread. False if macOS didn't save it or
+    /// it didn't finish within `limit`.
     static func write(_ value: Double, for slot: Slot, within limit: TimeInterval) async -> Bool {
+        await run(within: limit) { write(value, for: slot) }
+    }
+
+    /// Puts back the spot `slot` had (or removes it, if it had none). Runs
+    /// after any write still under way for it. False if it didn't take.
+    static func restore(_ slot: Slot, within limit: TimeInterval = 5) async -> Bool {
+        await run(within: limit) { write(slot.value, for: slot) }
+    }
+
+    private static func run(within limit: TimeInterval, _ body: @escaping () -> Bool) async -> Bool {
         await withCheckedContinuation { continuation in
             let lock = NSLock()
             var resumed = false
@@ -90,20 +104,8 @@ enum StatusItemPositions {
                 resumed = true
                 continuation.resume(returning: done)
             }
-            DispatchQueue.global(qos: .userInitiated).async {
-                finish(write(value, for: slot))
-            }
+            queue.async { finish(body()) }
             DispatchQueue.global().asyncAfter(deadline: .now() + limit) { finish(false) }
-        }
-    }
-
-    /// Puts back the spot `slot` had (or removes it, if it had none).
-    static func restore(_ slot: Slot) async {
-        await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                _ = write(slot.value, for: slot)
-                continuation.resume()
-            }
         }
     }
 
@@ -191,12 +193,26 @@ enum AppRestarter {
 
     @MainActor static func restartControlCenter() async {
         // launchd waits 10 s before bringing back a process that ran for less
-        // than that, leaving the bar without icons; space restarts out.
-        if let lastRestart, Date().timeIntervalSince(lastRestart) < 10.5 {
-            try? await Task.sleep(for: .seconds(10.5 - Date().timeIntervalSince(lastRestart)))
+        // than that, leaving the bar without icons; space restarts out. Its
+        // launch time counts too, in case Perch itself restarted since.
+        func running() -> NSRunningApplication? {
+            NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.controlcenter").first
         }
-        guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.controlcenter").first
-        else { return }
+        while true {
+            let started = [lastRestart, running()?.launchDate].compactMap { $0 }.max()
+            if let started, Date().timeIntervalSince(started) < 10.5 {
+                try? await Task.sleep(for: .seconds(10.5 - Date().timeIntervalSince(started)))
+                continue
+            }
+            // That wait can be long; don't close a menu you opened meanwhile,
+            // or restart while the screen is locked.
+            if MenuBarGeometry.isMenuOpen() || screenIsLocked {
+                try? await Task.sleep(for: .milliseconds(500))
+                continue
+            }
+            break
+        }
+        guard let app = running() else { return }
         lastRestart = Date()
         kill(app.processIdentifier, SIGTERM)
         // Gone, then back with its icons drawn.
@@ -207,5 +223,10 @@ enum AppRestarter {
             try? await Task.sleep(for: .milliseconds(50))
         }
         try? await Task.sleep(for: .milliseconds(300))
+    }
+
+    /// Whether the login window is covering the screen.
+    static var screenIsLocked: Bool {
+        (CGSessionCopyCurrentDictionary() as? [String: Any])?["CGSSessionScreenIsLocked"] as? Bool ?? false
     }
 }

@@ -4,7 +4,7 @@ import SwiftUI
 struct FeaturesPane: View {
     @ObservedObject var preferences: Preferences
     @ObservedObject var permissions: Permissions
-    let engine: LayoutEngine
+    @ObservedObject var engine: LayoutEngine
     @State private var explainingDrawer = false
     @State private var spacing = Double(MenuBarSpacing.current)
     @State private var appliedSpacing = MenuBarSpacing.current
@@ -44,7 +44,8 @@ struct FeaturesPane: View {
                 SpacingPreview(spacing: CGFloat(spacing.rounded()))
                 LabeledContent {
                     Button("Apply") { applySpacing() }
-                        .disabled(Int(spacing.rounded()) == appliedSpacing || MenuBarSpacing.isApplying)
+                        .disabled(Int(spacing.rounded()) == appliedSpacing || MenuBarSpacing.isApplying
+                                  || engine.isArranging || engine.hasQueuedMoves)
                 } label: {
                     Text("Apple's icons change right away")
                     Text("Other apps' icons change the next time each app opens. Perch never restarts your apps.")
