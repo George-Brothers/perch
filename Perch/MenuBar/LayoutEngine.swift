@@ -69,11 +69,11 @@ final class LayoutEngine: ObservableObject {
     /// Goes up with every accepted drop, so a pass clears only the batch it applied.
     private var queuedRevision = 0
 
-    /// What can hold moves: Arrange and Settings → Icons, while they're open.
-    enum Holder { case arrange, settings }
+    /// What can hold moves: Arrange, while it's open.
+    enum Holder { case arrange }
 
-    /// While Arrange (or Settings → Icons) is open, moves that need the bar to
-    /// reset wait until it closes: one reset however many icons you move.
+    /// While Arrange is open, moves that need the bar to reset wait until it
+    /// closes: one reset however many icons you move.
     /// (Each reset makes macOS redraw its own icons, and Focus shows its name
     /// again.) Moves that only need the divider still happen right away.
     func hold(_ on: Bool, for holder: Holder) {

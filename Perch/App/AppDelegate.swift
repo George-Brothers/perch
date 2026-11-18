@@ -39,9 +39,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.menuBar = menuBar
         self.engine = engine
 
-        settings = SettingsWindowController { navigation in
-            AnyView(SettingsView(navigation: navigation, preferences: preferences,
-                                 permissions: permissions, engine: engine, images: images))
+        settings = SettingsWindowController {
+            AnyView(SettingsView(preferences: preferences, permissions: permissions, engine: engine))
         }
 
         arrangePanel = PanelController(model: engine) { [weak self] in
@@ -57,7 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 },
                 onOpenSettings: {
                     self?.arrangePanel.close()
-                    self?.settings.show(pane: .general)
+                    self?.settings.show()
                 }
             ))
         }
@@ -147,10 +146,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Every icon is a Spotlight result; picking one opens its menu.
         spotlight = SpotlightIndex(engine: engine)
 
-        menuBar.openSettings = { [weak self] pane in
-            self?.closePanels(except: nil)
-            self?.settings.show(pane: pane)
-        }
         menuBar.openArrange = { [weak self] in
             self?.closePanels(except: .arrange)
             self?.arrangePanel.toggle(anchor: menuBar.anchor)
@@ -278,7 +273,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// so there is always a way back in even if the menu bar icon is out of view.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if let opened = openedFromSpotlight, Date().timeIntervalSince(opened) < 2 { return false }
-        settings.show(pane: nil)
+        settings.show()
         return false
     }
 }
