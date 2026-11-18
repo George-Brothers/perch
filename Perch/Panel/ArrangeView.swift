@@ -1,4 +1,7 @@
 import SwiftUI
+import os
+
+private let arrangeLog = Logger(subsystem: "com.georgebrothers.perch", category: "arrange")
 
 /// Arrange: your menu bar in rows that mirror it, left to right.
 ///
@@ -104,7 +107,10 @@ struct ArrangeBar: View {
                         .frame(width: rowWidth + labelWidth, alignment: .leading)
                 }
             }
-            .onChange(of: engine.isArranging) { _, arranging in if !arranging { pending = nil } }
+            // Keep showing your drop until every move is done and the bar has settled.
+            .onChange(of: engine.isArranging) { _, arranging in
+                if !arranging && !engine.hasQueuedMoves { pending = nil }
+            }
             .onChange(of: barSignature) { _, _ in if !engine.isArranging { pending = nil } }
         }
     }
@@ -238,7 +244,6 @@ struct ArrangeBar: View {
         DragGesture(minimumDistance: 3, coordinateSpace: .named("arrange"))
             .updating($dragging) { _, down, _ in down = true }
             .onChanged { value in
-                guard !engine.isArranging else { return }
                 if drag == nil, let (slot, frame) = frames.first(where: { $0.value.contains(value.startLocation) }),
                    let row = rows.first(where: { $0.value.contains(slot) })?.key {
                     drag = DragState(
@@ -246,6 +251,9 @@ struct ArrangeBar: View {
                         grab: CGSize(width: value.startLocation.x - frame.minX, height: value.startLocation.y - frame.minY),
                         original: rows, frames: frames, rowFrames: rowFrames
                     )
+                    arrangeLog.notice("drag started from \(row.title, privacy: .public)")
+                } else if drag == nil {
+                    arrangeLog.notice("drag ignored: nothing under the pointer")
                 }
                 drag?.location = value.location
             }
@@ -301,7 +309,10 @@ struct ArrangeBar: View {
         }
         guard let row, final != drag.original,
               let index = final[row]?.firstIndex(of: drag.slot)
-        else { return }
+        else {
+            arrangeLog.notice("drop ignored: \(row == nil ? "no row" : "same spot", privacy: .public)")
+            return
+        }
 
         let slots = final[row] ?? []
         let next = index + 1 < slots.count ? slots[index + 1] : nil
@@ -319,6 +330,7 @@ struct ArrangeBar: View {
             engine.placePerch(.before(anchor, shown: true))
         case .icon(let key):
             guard let item = item(key) else { return }
+            arrangeLog.notice("dropped \(item.displayName, privacy: .public) in \(row.title, privacy: .public)")
             engine.place(item, .before(anchor, shown: shown), priority: shown ? .shown : .hidden)
         }
     }
