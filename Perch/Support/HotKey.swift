@@ -52,11 +52,11 @@ struct Shortcut: Equatable {
         // Ask the current keyboard layout what the key types.
         // Input methods such as Pinyin have no layout of their own; fall back to
         // the keyboard underneath them.
-        let sources = [TISCopyCurrentKeyboardLayoutInputSource(), TISCopyCurrentASCIICapableKeyboardLayoutInputSource()]
-        guard let data = sources.lazy
-            .compactMap({ $0?.takeRetainedValue() })
-            .compactMap({ TISGetInputSourceProperty($0, kTISPropertyUnicodeKeyLayoutData) })
-            .first
+        let layoutData = { (source: TISInputSource?) in
+            source.flatMap { TISGetInputSourceProperty($0, kTISPropertyUnicodeKeyLayoutData) }
+        }
+        guard let data = layoutData(TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue())
+            ?? layoutData(TISCopyCurrentASCIICapableKeyboardLayoutInputSource()?.takeRetainedValue())
         else { return "?" }
         let layout = unsafeBitCast(data, to: CFData.self)
         var deadKeys: UInt32 = 0

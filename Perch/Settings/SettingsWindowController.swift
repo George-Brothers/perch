@@ -59,6 +59,12 @@ final class SettingsWindowController {
             window.center()
             window.setFrameAutosaveName("PerchSettings")
             self.window = window
+        } else if let window, !window.isVisible {
+            // Fresh content each time Settings opens, so every pane reloads
+            // (permissions, icons, an unapplied spacing edit).
+            let frame = window.frame
+            window.contentViewController = NSHostingController(rootView: makeContent(navigation))
+            window.setFrame(frame, display: false)
         }
 
         // Perch has no Dock icon, so macOS won't always bring it forward on its own.

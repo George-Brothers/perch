@@ -26,7 +26,8 @@ final class DrawerController {
         self.preferences = preferences
     }
 
-    var isOpen: Bool { panel?.isVisible == true }
+    /// False as soon as closing starts, so a click during the fade reopens it.
+    private(set) var isOpen = false
 
     func toggle(anchor: NSStatusBarButton?) {
         isOpen ? close() : open(anchor: anchor)
@@ -37,6 +38,7 @@ final class DrawerController {
         let panel = self.panel ?? makePanel()
         self.panel = panel
         generation += 1
+        isOpen = true
         position(panel)
         panel.alphaValue = 0
         panel.orderFrontRegardless()
@@ -54,7 +56,8 @@ final class DrawerController {
     }
 
     func close() {
-        guard let panel, panel.isVisible else { return }
+        guard isOpen, let panel else { return }
+        isOpen = false
         removeMonitors()
         let closing = generation
         NSAnimationContext.runAnimationGroup { context in

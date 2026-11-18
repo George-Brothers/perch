@@ -50,6 +50,11 @@ final class IconImages: ObservableObject {
         }
     }
 
+    /// Returns once no capture is running.
+    func waitUntilIdle() async {
+        while isCapturing { try? await Task.sleep(for: .milliseconds(50)) }
+    }
+
     func clear() {
         images = [:]
         captured = [:]
@@ -85,10 +90,13 @@ final class IconImages: ObservableObject {
 
         let pictures = await withTaskGroup(of: (String, NSImage)?.self) { group in
             for job in jobs {
-                // SCWindow frames use a top-left origin; x matches NSScreen's.
-                let scale = NSScreen.screens
-                    .first { $0.frame.minX <= job.window.frame.midX && job.window.frame.midX < $0.frame.maxX }?
-                    .backingScaleFactor ?? 2
+                // SCWindow frames use a top-left origin on the primary display.
+                let primaryTop = NSScreen.screens.first?.frame.maxY ?? 0
+                let mid = CGPoint(x: job.window.frame.midX, y: job.window.frame.midY)
+                let scale = NSScreen.screens.first { screen in
+                    CGRect(x: screen.frame.minX, y: primaryTop - screen.frame.maxY,
+                           width: screen.frame.width, height: screen.frame.height).contains(mid)
+                }?.backingScaleFactor ?? 2
                 group.addTask {
                     let config = SCStreamConfiguration()
                     config.width = Int(job.window.frame.width * scale)

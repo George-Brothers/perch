@@ -106,6 +106,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     menuBar.reveal(armAutoHide: false)
                     try? await Task.sleep(for: .milliseconds(400))
                     await captureVisible()
+                    // The reveal also starts the usual capture; let it finish first.
+                    await images.waitUntilIdle()
                     if menuBar.visibility.isRevealed, !menuBar.isBusy { menuBar.collapse() }
                 }
             }
