@@ -92,6 +92,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         arrangePanel.onOpen = { Task { await images.refresh?() } }
+        // Perch's icon stays in the bar until it can tell empty menu bar space
+        // from an icon, which needs Accessibility.
+        permissions.$hasAccessibility
+            .removeDuplicates()
+            .sink { menuBar.hasAccessibility = $0 }
+            .store(in: &cancellables)
+        // Adding or removing Perch's item moves the others; Arrange should show it.
+        preferences.$barItem
+            .dropFirst()
+            .debounce(for: .milliseconds(500), scheduler: RunLoop.main)
+            .sink { _ in engine.refresh() }
+            .store(in: &cancellables)
         // Turning the drawer on (with permission already granted): show the
         // hidden icons for a moment so the drawer has pictures of them.
         preferences.$drawerEnabled
@@ -118,13 +130,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         drawer.onOpenItem = { item in
             if !menuBar.openTemporarily(item) { NSSound.beep() }
         }
-        drawer.onOpenArrange = { [weak self] in self?.arrangePanel.open(anchor: menuBar.perchButton) }
+        drawer.onOpenArrange = { [weak self] in self?.arrangePanel.open(anchor: menuBar.anchor) }
         menuBar.toggleDrawer = { [weak self] in
             guard preferences.drawerEnabled, permissions.hasScreenRecording, permissions.hasAccessibility else {
                 return false
             }
             self?.closePanels(except: .drawer)
-            self?.drawer.toggle(anchor: menuBar.perchButton)
+            self?.drawer.toggle(anchor: menuBar.anchor)
             return true
         }
 
@@ -136,16 +148,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.closePanels(except: nil)
             self?.settings.show(pane: pane)
         }
-        menuBar.openArrange = { [weak self] anchor in
+        menuBar.openArrange = { [weak self] in
             self?.closePanels(except: .arrange)
-            self?.arrangePanel.toggle(anchor: anchor)
+            self?.arrangePanel.toggle(anchor: menuBar.anchor)
         }
 
         // First launch: Perch needs Accessibility to arrange anything, so show
         // the Arrange list (which asks for it) instead of a tutorial.
         if !permissions.hasAccessibility {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                self?.arrangePanel.open(anchor: menuBar.perchButton)
+                self?.arrangePanel.open(anchor: menuBar.anchor)
             }
         }
     }
@@ -171,7 +183,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func showArrange() {
         guard !arrangePanel.isOpen else { return }
         closePanels(except: .arrange)
-        arrangePanel.open(anchor: menuBar.perchButton)
+        arrangePanel.open(anchor: menuBar.anchor)
     }
 
     func icons() async -> [MenuBarItem] {

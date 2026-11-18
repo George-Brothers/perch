@@ -8,6 +8,9 @@ import os
 ///
 ///     [hidden icons] │ [shown icons] 🐦 [Control Center, clock]
 ///
+/// The 🐦 is optional (Settings → General): it can be a thin line, or nothing
+/// at all. Clicking empty menu bar space does the same as clicking it.
+///
 /// macOS has no API for hiding another app's icon. Instead the │ divider is a
 /// status item that Perch stretches to 10,000 points wide. Everything to its
 /// left gets pushed off the screen. Shrinking it brings those icons back.
@@ -44,7 +47,7 @@ final class MenuBarController: NSObject, ObservableObject {
     @Published private(set) var visibility: Visibility = .revealed
 
     var openSettings: ((SettingsPane?) -> Void)?
-    var openArrange: ((NSStatusBarButton?) -> Void)?
+    var openArrange: (() -> Void)?
     /// Called once Perch's items are placed, and again after a reset.
     var onReady: (() -> Void)?
     /// Handles a click on the bird instead of revealing, when the drawer is on.
@@ -53,7 +56,20 @@ final class MenuBarController: NSObject, ObservableObject {
     /// Runs once at launch while everything is still showing, before the first hide.
     var beforeFirstHide: (() async -> Void)?
 
-    var perchButton: NSStatusBarButton? { perchItem.button }
+    /// Where Perch's panels hang from: Perch's own item, or when there's
+    /// nothing in the bar, the spot where the hidden icons start.
+    var anchor: PanelAnchor {
+        { [weak self] in self?.anchorFrame() }
+    }
+
+    /// False until Perch has Accessibility. Without it Perch can't tell empty
+    /// menu bar space from an icon, so its icon stays in the bar.
+    var hasAccessibility = AXIsProcessTrusted() {
+        didSet { if hasAccessibility != oldValue { updatePerchIcon() } }
+    }
+
+    /// What's in the bar for Perch right now.
+    private var barItem: PerchBarItem { hasAccessibility ? preferences.barItem : .icon }
 
     private let preferences: Preferences
     private let log = Logger(subsystem: "com.georgebrothers.perch", category: "menubar")
@@ -63,6 +79,7 @@ final class MenuBarController: NSObject, ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var placementAttempts = 0
     private var hasReset = false
+    private var barClickMonitor: Any?
     /// While Perch moves icons it shows and hides the bar itself; clicks wait.
     var isBusy = false
 
@@ -74,6 +91,7 @@ final class MenuBarController: NSObject, ObservableObject {
         seedPositionsIfNeeded()
         createItems()
         observePreferences()
+        watchEmptyBarClicks()
         collapseOncePlaced()
     }
 
@@ -208,10 +226,23 @@ final class MenuBarController: NSObject, ObservableObject {
     /// The divider's frame in screen coordinates (top-left origin), while revealed.
     func dividerFrame() -> CGRect? { screenFrame(of: hiddenDivider) }
 
-    /// The bird's frame in screen coordinates (top-left origin).
-    func perchFrame() -> CGRect? { screenFrame(of: perchItem) }
+    /// Perch's item's frame in screen coordinates (top-left origin), or nil
+    /// when it isn't in the bar.
+    func perchFrame() -> CGRect? { perchItem.isVisible ? screenFrame(of: perchItem) : nil }
 
-    var screen: NSScreen? { perchItem.button?.window?.screen ?? NSScreen.main }
+    /// The display whose menu bar holds Perch's items.
+    var screen: NSScreen? {
+        if perchItem.isVisible, let screen = perchItem.button?.window?.screen { return screen }
+        return anchorFrame().flatMap(PanelAnchorScreen.of) ?? NSScreen.main
+    }
+
+    /// Bottom-left origin, like window frames. The divider's right edge is
+    /// where the hidden icons end, even while it's stretched off screen.
+    private func anchorFrame() -> NSRect? {
+        if perchItem.isVisible, let frame = perchItem.button?.window?.frame, frame.height > 0 { return frame }
+        guard let frame = hiddenDivider.button?.window?.frame, frame.height > 0 else { return nil }
+        return NSRect(x: frame.maxX - 1, y: frame.minY, width: 1, height: frame.height)
+    }
 
     /// Puts Perch's items back next to Control Center, in the right order.
     func resetPositions() {
@@ -252,7 +283,9 @@ final class MenuBarController: NSObject, ObservableObject {
         if let button = hiddenDivider.button {
             button.target = self
             button.action = #selector(dividerClicked(_:))
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
             button.setAccessibilityLabel("Perch divider")
+            button.toolTip = "Click to hide icons. Right-click to arrange."
         }
 
         apply()
@@ -283,6 +316,19 @@ final class MenuBarController: NSObject, ObservableObject {
 
     private func updatePerchIcon() {
         guard let button = perchItem.button else { return }
+        let item = barItem
+        let visible = item != .none
+        if perchItem.isVisible != visible { perchItem.isVisible = visible }
+        switch item {
+        case .none:
+            return
+        case .line:
+            button.image = visibility.isRevealed ? Self.lineImage(alpha: 0.9) : Self.lineImage(alpha: 0.6)
+            perchItem.length = Self.lineImageWidth
+            return
+        case .icon:
+            break
+        }
         let name = preferences.iconStyle.symbolName(revealed: visibility.isRevealed)
         // Small and tight: Perch should take as little of the bar as possible.
         let config = NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
@@ -294,6 +340,26 @@ final class MenuBarController: NSObject, ObservableObject {
         if let width = image?.size.width {
             perchItem.length = ceil(width)
         }
+    }
+
+    private static let lineImageWidth: CGFloat = 6
+
+    /// Perch's item as a line: a little taller and bolder than the divider,
+    /// so it reads as something to click.
+    private static func lineImage(alpha: CGFloat) -> NSImage {
+        let image = NSImage(size: NSSize(width: lineImageWidth, height: 14), flipped: false) { _ in
+            let path = NSBezierPath()
+            path.move(to: NSPoint(x: lineImageWidth / 2, y: 1))
+            path.line(to: NSPoint(x: lineImageWidth / 2, y: 13))
+            path.lineWidth = 2
+            path.lineCapStyle = .round
+            NSColor.black.withAlphaComponent(alpha).setStroke()
+            path.stroke()
+            return true
+        }
+        image.isTemplate = true
+        image.accessibilityDescription = "Perch"
+        return image
     }
 
     private static let dividerImage: NSImage = {
@@ -333,7 +399,9 @@ final class MenuBarController: NSObject, ObservableObject {
     }
 
     private func waitForPlacement() {
-        if screenFrame(of: perchItem) != nil || placementAttempts >= 12 {
+        let placed = screenFrame(of: hiddenDivider) != nil
+            && (!perchItem.isVisible || screenFrame(of: perchItem) != nil)
+        if placed || placementAttempts >= 12 {
             Task {
                 if let beforeFirstHide {
                     await beforeFirstHide()
@@ -349,7 +417,7 @@ final class MenuBarController: NSObject, ObservableObject {
     }
 
     private func perchIsRightOfDivider() -> Bool {
-        guard let perch = screenFrame(of: perchItem), let divider = screenFrame(of: hiddenDivider) else { return true }
+        guard let perch = perchFrame(), let divider = screenFrame(of: hiddenDivider) else { return true }
         return divider.maxX <= perch.minX + 1
     }
 
@@ -366,18 +434,49 @@ final class MenuBarController: NSObject, ObservableObject {
     /// Click: show or hide icons (or the drawer). Right-click, Control-click
     /// or Option-click: Arrange, which also holds Settings and Quit.
     @objc private func perchClicked(_ sender: NSStatusBarButton) {
-        let event = NSApp.currentEvent
-        if event?.type == .rightMouseUp || event?.modifierFlags.contains(.control) == true
-            || event?.modifierFlags.contains(.option) == true {
-            openArrange?(perchItem.button)
+        if Self.wantsArrange(NSApp.currentEvent) {
+            openArrange?()
         } else {
             menuToggle()
         }
     }
 
+    /// Revealed, the divider is the thin line: a click hides. Collapsed, it
+    /// stretches under empty menu bar space, so a click there may land on it.
     @objc private func dividerClicked(_ sender: NSStatusBarButton) {
-        guard !isBusy else { return }
-        collapse()
+        if Self.wantsArrange(NSApp.currentEvent) {
+            openArrange?()
+        } else {
+            menuToggle()
+        }
+    }
+
+    private static func wantsArrange(_ event: NSEvent?) -> Bool {
+        guard let event else { return false }
+        return event.type == .rightMouseUp || event.type == .rightMouseDown
+            || event.modifierFlags.contains(.control) || event.modifierFlags.contains(.option)
+    }
+
+    /// Empty menu bar space works like Perch's item: click to show or hide,
+    /// right-click to arrange. A global monitor only sees clicks meant for
+    /// other apps, and this one asks Accessibility what's under the pointer
+    /// only for clicks inside the menu bar. Nothing runs between clicks.
+    private func watchEmptyBarClicks() {
+        barClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+            MainActor.assumeIsolated { self?.barClicked(event) }
+        }
+    }
+
+    private func barClicked(_ event: NSEvent) {
+        // Single clicks only, and not ⌘-drags (yours or Perch's own moves).
+        guard !isBusy, event.clickCount == 1, !event.modifierFlags.contains(.command),
+              MenuBarGeometry.isEmptyMenuBarSpace(NSEvent.mouseLocation),
+              !MenuBarGeometry.isMenuOpen() else { return }
+        if Self.wantsArrange(event) {
+            openArrange?()
+        } else {
+            menuToggle()
+        }
     }
 
     /// With the bar already showing everything, a click hides it again
@@ -389,8 +488,9 @@ final class MenuBarController: NSObject, ObservableObject {
     // MARK: - Preferences
 
     private func observePreferences() {
-        preferences.$iconStyle
-            .dropFirst()
+        preferences.$iconStyle.map { _ in () }
+            .merge(with: preferences.$barItem.map { _ in () })
+            .dropFirst(2)
             .sink { [weak self] _ in
                 DispatchQueue.main.async { self?.updatePerchIcon() }
             }

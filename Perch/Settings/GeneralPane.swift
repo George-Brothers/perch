@@ -20,11 +20,24 @@ struct GeneralPane: View {
                 if let loginError {
                     Text(loginError).font(.callout).foregroundStyle(.red)
                 }
-                Picker("Menu bar icon", selection: $preferences.iconStyle) {
-                    ForEach(PerchIconStyle.allCases) { style in
-                        Label(style.title, systemImage: style.symbolName(revealed: false)).tag(style)
+            }
+
+            Section {
+                Picker("In the menu bar", selection: $preferences.barItem) {
+                    ForEach(PerchBarItem.allCases) { item in
+                        Text(item.title).tag(item)
                     }
                 }
+                .pickerStyle(.segmented)
+                if preferences.barItem == .icon {
+                    Picker("Icon", selection: $preferences.iconStyle) {
+                        ForEach(PerchIconStyle.allCases) { style in
+                            Label(style.title, systemImage: style.symbolName(revealed: false)).tag(style)
+                        }
+                    }
+                }
+            } footer: {
+                Text(barItemFooter).foregroundStyle(.secondary)
             }
 
             Section {
@@ -42,7 +55,7 @@ struct GeneralPane: View {
                     Toggle("Also when I click outside the menu bar", isOn: $preferences.rehideOnClickOutside)
                 }
             } footer: {
-                Text("Click Perch's icon to show or hide icons. Perch waits while a menu is open.")
+                Text("Perch waits while a menu is open.")
                     .foregroundStyle(.secondary)
             }
 
@@ -63,6 +76,18 @@ struct GeneralPane: View {
         .onAppear {
             refreshLoginState()
             permissions.refresh()
+        }
+    }
+
+    private var barItemFooter: String {
+        let click = "Click empty space in the menu bar to show or hide icons. Right-click it to arrange them."
+        switch preferences.barItem {
+        case .none:
+            return permissions.hasAccessibility
+                ? click
+                : "Perch's icon stays until Perch has Accessibility, which it needs to notice clicks on empty space."
+        case .line: return "A thin line, which you can click like the icon. " + click
+        case .icon: return click
         }
     }
 

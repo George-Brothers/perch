@@ -18,6 +18,26 @@ enum MenuBarGeometry {
         return point.y >= screen.frame.maxY - menuBarHeight(for: screen)
     }
 
+    /// Whether a point (screen coordinates, bottom-left origin) is empty menu
+    /// bar space: in the bar, but not on an app menu or any icon. Asks
+    /// Accessibility what's under the point; without it, the answer is no.
+    /// Only the front app's own bar counts, so the small gaps between icons don't.
+    @MainActor static func isEmptyMenuBarSpace(_ point: NSPoint) -> Bool {
+        guard isInMenuBar(point), AXIsProcessTrusted(),
+              let front = NSWorkspace.shared.frontmostApplication?.processIdentifier else { return false }
+        let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
+        var element: AXUIElement?
+        let error = AXUIElementCopyElementAtPosition(
+            AXUIElementCreateSystemWide(), Float(point.x), Float(primaryHeight - point.y), &element
+        )
+        guard error == .success, let element else { return false }
+        var role: CFTypeRef?
+        var pid: pid_t = 0
+        AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
+        AXUIElementGetPid(element, &pid)
+        return role as? String == kAXMenuBarRole as String && pid == front
+    }
+
     /// Owners whose always-present windows hang from the top of the screen
     /// but are not menus.
     private static let ignoredOwners: Set<String> = ["Window Server", "Dock", "Notification Center"]

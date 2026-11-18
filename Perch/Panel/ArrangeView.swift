@@ -337,9 +337,15 @@ private struct PerchMark: View {
     @ObservedObject var preferences: Preferences
 
     var body: some View {
-        Image(systemName: preferences.iconStyle.symbolName(revealed: false))
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(.secondary)
+        Group {
+            if preferences.barItem == .line {
+                Capsule().fill(.secondary).frame(width: 2, height: 14)
+            } else {
+                Image(systemName: preferences.iconStyle.symbolName(revealed: false))
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+        }
             .frame(width: 22, height: 26)
             .contentShape(Rectangle())
             .help("Perch")

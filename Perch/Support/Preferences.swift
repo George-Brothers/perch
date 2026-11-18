@@ -26,6 +26,26 @@ enum PerchIconStyle: String, CaseIterable, Identifiable {
     }
 }
 
+/// What Perch puts in the menu bar for itself.
+enum PerchBarItem: String, CaseIterable, Identifiable {
+    /// Nothing: click empty menu bar space instead. Takes no room at all.
+    case none
+    /// A thin line where the hidden icons start.
+    case line
+    /// Perch's icon (see `PerchIconStyle`).
+    case icon
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .none: "Nothing"
+        case .line: "Line"
+        case .icon: "Icon"
+        }
+    }
+}
+
 /// Where you want an icon. Its order in the bar is its priority: when the bar
 /// runs out of room, the leftmost icons are hidden until there's room again.
 enum IconPriority: String, CaseIterable, Identifiable {
@@ -53,6 +73,7 @@ final class Preferences: ObservableObject {
 
     private enum Key {
         static let iconStyle = "iconStyle"
+        static let barItem = "barItem"
         static let priorities = "iconPriorities"
         static let autoRehideEnabled = "autoRehideEnabled"
         static let rehideDelay = "rehideDelay"
@@ -64,6 +85,11 @@ final class Preferences: ObservableObject {
 
     @Published var iconStyle: PerchIconStyle {
         didSet { defaults.set(iconStyle.rawValue, forKey: Key.iconStyle) }
+    }
+    /// What Perch shows in the bar. Nothing by default: every icon's worth of
+    /// space goes to your icons, and empty menu bar space does Perch's job.
+    @Published var barItem: PerchBarItem {
+        didSet { defaults.set(barItem.rawValue, forKey: Key.barItem) }
     }
     /// Priority per icon, keyed by `MenuBarItem.key`. Icons not listed are `.auto`.
     @Published private(set) var priorities: [String: IconPriority] {
@@ -89,12 +115,14 @@ final class Preferences: ObservableObject {
         self.defaults = defaults
         defaults.register(defaults: [
             Key.iconStyle: PerchIconStyle.bird.rawValue,
+            Key.barItem: PerchBarItem.none.rawValue,
             Key.autoRehideEnabled: true,
             Key.rehideDelay: 15.0,
             Key.rehideOnClickOutside: true,
             Key.drawerEnabled: false,
         ])
         iconStyle = PerchIconStyle(rawValue: defaults.string(forKey: Key.iconStyle) ?? "") ?? .bird
+        barItem = PerchBarItem(rawValue: defaults.string(forKey: Key.barItem) ?? "") ?? .none
         let stored = defaults.dictionary(forKey: Key.priorities) as? [String: String] ?? [:]
         priorities = stored.compactMapValues(IconPriority.init(stored:)).filter { $0.value == .hidden }
         autoRehideEnabled = defaults.bool(forKey: Key.autoRehideEnabled)

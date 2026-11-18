@@ -16,6 +16,7 @@
 10. `perch-compact`: smaller Perch icon.
 11. `perch-spotlight-icons`: icons in Spotlight; search panel and hotkey removed.
 12. `perch-arrange-order`: Arrange as one ordered bar; drag to any spot; right-click opens it.
+13. `perch-bar-item`: Perch shows nothing, a line, or an icon (Settings → General). Clicking empty menu bar space shows or hides; right-click arranges.
 
 ## macOS 26 facts
 - Every status item window is owned by Control Center (layer 25); AX per app gives identity (AXExtrasMenuBar).
@@ -24,6 +25,8 @@
 - Items behind the notch aren't drawn and can't be dragged. The drawer is the fix.
 - AXPress fails for Shottr and Wispr Flow; fallback is a synthetic click with the pointer put back.
 - Each display draws its own copy of the status item windows.
+- AX hit test (`AXUIElementCopyElementAtPosition`) on empty menu bar space returns role AXMenuBar owned by the front app; app menus and icons return AXMenuBarItem. That's how Perch spots an empty-space click.
+- A collapsed divider is clamped to about 5,000 pt wide; its right edge is still where hidden icons end.
 - Nothing can be moved or captured while the screen is locked; Perch skips passes then.
 
 ## Testing
