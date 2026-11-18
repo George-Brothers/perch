@@ -182,7 +182,7 @@ struct DrawerView: View {
     let onClose: () -> Void
 
     private var hidden: [MenuBarItem] {
-        engine.items.filter { $0.section == .hidden }.sorted { $0.frame.minX < $1.frame.minX }
+        engine.inHiddenOrder(engine.items.filter { $0.section == .hidden })
     }
 
     var body: some View {

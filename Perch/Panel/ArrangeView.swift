@@ -77,14 +77,12 @@ struct ArrangeBar: View {
                 .onPreferenceChange(ContentWidth.self) { contentWidth = $0 }
                 .animation(.snappy(duration: 0.18), value: rows)
 
-                ForEach(engine.waitingForRestart.sorted(by: { $0.value < $1.value }), id: \.key) { bundleID, name in
-                    HStack(spacing: 8) {
-                        Text("\(name) moves when it restarts.")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                        Button("Restart Now") { engine.restartNow(bundleID) }
-                            .controlSize(.small)
-                    }
+                if !waitingApps.isEmpty {
+                    Text("\(waitingApps.formatted(.list(type: .and))) will move the next time \(waitingApps.count == 1 ? "it opens" : "they open"). To move \(waitingApps.count == 1 ? "it" : "them") now, ⌘-drag in the menu bar.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(width: rowWidth + labelWidth, alignment: .leading)
                 }
 
                 if let offHint {
@@ -182,7 +180,7 @@ struct ArrangeBar: View {
             if let item = item(key) {
                 BarIcon(item: item, image: images.image(for: item),
                         width: row == .off ? nil : item.frame.width,
-                        waiting: row == .bar && item.section == .hidden && !engine.isArranging,
+                        waiting: engine.isArranging ? nil : waitingNote(for: item, in: row),
                         clickable: onOpenItem != nil && row != .off && !engine.isArranging)
                     .opacity(drag?.slot == slot ? 0 : (row == .off ? 0.5 : 1))
                     .onTapGesture {
@@ -215,7 +213,7 @@ struct ArrangeBar: View {
                     PerchMark(preferences: preferences, width: engine.perchWidth)
                 case .icon(let key):
                     if let item = item(key) {
-                        BarIcon(item: item, image: images.image(for: item), width: nil, waiting: false, clickable: false)
+                        BarIcon(item: item, image: images.image(for: item), width: nil, waiting: nil, clickable: false)
                     }
                 }
             }
@@ -275,7 +273,8 @@ struct ArrangeBar: View {
                 .firstIndex { $0.frame.minX > perchX } ?? bar.count
             bar.insert(.perch, at: index)
         }
-        let hidden = byX.filter { $0.isInMenuBar && preferences.priority(for: $0.key) == .hidden }.map { Slot.icon($0.key) }
+        let hidden = engine.inHiddenOrder(byX.filter { $0.isInMenuBar && preferences.priority(for: $0.key) == .hidden })
+            .map { Slot.icon($0.key) }
         let off = byX.filter { !$0.isInMenuBar }.map { Slot.icon($0.key) }
         return [.bar: bar, .hidden: hidden, .off: off]
     }
@@ -325,6 +324,19 @@ struct ArrangeBar: View {
 
     private var icons: [MenuBarItem] {
         engine.items.filter { $0.isMovable || !$0.isInMenuBar }.filter { !$0.isFixed }
+    }
+
+    /// Apps whose icons move the next time they open.
+    private var waitingApps: [String] {
+        Array(Set(engine.pendingMoves.values.map(\.name))).sorted()
+    }
+
+    /// Why an icon is drawn faded: it isn't where its row says yet.
+    private func waitingNote(for item: MenuBarItem, in row: Row) -> String? {
+        if let move = engine.pendingMoves[item.key] {
+            return move.hides ? "hides the next time it opens" : "moves the next time it opens"
+        }
+        return row == .bar && item.section == .hidden ? "no room right now" : nil
     }
 
     private var hasPictures: Bool {
@@ -387,8 +399,9 @@ private struct BarIcon: View {
     let image: NSImage?
     /// The icon's real width in the bar, so rows are drawn to scale.
     let width: CGFloat?
-    /// In the bar's order but waiting in Hidden because there's no room.
-    let waiting: Bool
+    /// Why it's drawn faded: it isn't in its row's spot yet (no room, or its
+    /// app hasn't reopened since you moved it).
+    let waiting: String?
     let clickable: Bool
     @State private var hovering = false
 
@@ -409,14 +422,14 @@ private struct BarIcon: View {
             }
         }
         .frame(width: width.flatMap { $0 > 4 ? $0 : nil })
-        .opacity(waiting ? 0.4 : 1)
+        .opacity(waiting == nil ? 1 : 0.4)
         .background(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .fill(Color.primary.opacity(hovering && clickable ? 0.12 : 0))
         )
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
-        .help(waiting ? "\(item.displayName): no room right now" : item.displayName)
+        .help(waiting.map { "\(item.displayName): \($0)" } ?? item.displayName)
         .accessibilityLabel(item.displayName)
     }
 }
