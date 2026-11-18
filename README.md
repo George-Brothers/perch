@@ -11,8 +11,8 @@ A light menu bar manager for macOS. Perch hides the menu bar icons you don't nee
 - **Click the bird to show or hide.** Hidden icons come back with one click and go away with another.
 - **Always show, Show when there's room, Hidden.** Drag each icon onto a shelf in the Arrange panel. Perch keeps the bar that way, moving icons for you when apps open or quit, a display changes or your Mac wakes.
 - **Drawer (optional).** Hidden icons drop down in a small bar under the menu bar, so nothing has to fit next to the notch. Needs Screen Recording, so it's off until you turn it on in Settings → Features.
-- **Search.** Press ⌥⇧Space anywhere, type part of an icon's name and press Return to open it, even when it's hidden.
-- **Spotlight and Shortcuts.** Show hidden icons, search, or open any icon from Spotlight.
+- **Spotlight.** Every menu bar icon shows up in Spotlight. Type its name and press Return to open its menu, even when it's hidden.
+- **Shortcuts.** Show Hidden Icons and Open Menu Bar Icon actions.
 - **Tighter spacing.** A slider fits more icons in the same bar.
 - **Auto-hide**, launch at login and a choice of menu bar icon.
 
@@ -22,8 +22,8 @@ Perch uses about 15 MB of memory and no CPU while idle. It reacts to events and 
 
 - **Click** the bird: show or hide hidden icons (or open the drawer, if it's on).
 - **Option-click** the bird: Arrange. Drag icons between shelves.
-- **Right-click** the bird: Search, Arrange, Settings, Quit.
-- **⌥⇧Space**: search. Change or turn it off in Settings → Features.
+- **Right-click** the bird: Arrange, Settings, Quit.
+- **⌘Space**, then an icon's name: open that icon's menu.
 
 ## Build
 

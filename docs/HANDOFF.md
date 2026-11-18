@@ -10,9 +10,11 @@
 4. `perch-drawer`: opt-in drawer under the bar (Screen Recording, explained first in Settings → Features).
 5. `perch-arrange`: Arrange as three drag-and-drop shelves.
 6. `perch-spacing`: icon spacing slider (NSStatusItemSpacing / NSStatusItemSelectionPadding, reopen apps to apply).
-7. `perch-search`: ⌥⇧Space search panel (Carbon hotkey, no permission).
+7. `perch-search`: ⌥⇧Space search panel (Carbon hotkey). Replaced by Spotlight in `perch-spotlight-icons`.
 8. `perch-spotlight`: App Intents (Show Hidden Icons, Search, Open Menu Bar Icon).
-9. `perch-polish`: visual pass, docs.
+9. `perch-polish`: visual pass, docs, council fixes.
+10. `perch-compact`: smaller Perch icon.
+11. `perch-spotlight-icons`: icons in Spotlight; search panel and hotkey removed.
 
 ## macOS 26 facts
 - Every status item window is owned by Control Center (layer 25); AX per app gives identity (AXExtrasMenuBar).

@@ -1,4 +1,5 @@
 import AppKit
+import CoreSpotlight
 import Combine
 import SwiftUI
 
@@ -11,11 +12,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var arrangePanel: PanelController!
     private var drawer: DrawerController!
     private let images = IconImages()
-    private let searchModel = SearchModel()
-    private var searchPanel: PanelController!
-    private var hotKey: HotKey!
+    private var spotlight: SpotlightIndex!
     private var cancellables = Set<AnyCancellable>()
-    private var openSearchAction: (() -> Void)?
 
     /// For App Intents (Spotlight and Shortcuts), which run inside Perch.
     private(set) static weak var shared: AppDelegate?
@@ -129,45 +127,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return true
         }
 
-        // Search: a shortcut (⌥⇧Space by default) finds and opens any icon.
-        let searchModel = self.searchModel
-        searchPanel = PanelController(model: engine) { [weak self] in
-            AnyView(SearchView(model: searchModel, engine: engine) { item in
-                self?.searchPanel.close()
-                if self?.open(item) == false { NSSound.beep() }
-            })
-        }
-        searchPanel.onOpen = {
-            searchModel.reset()
-            engine.refresh()
-        }
-        let openSearch = { [weak self] in
-            guard let self else { return }
-            // Without Accessibility there's nothing to search; show why instead.
-            guard permissions.hasAccessibility else {
-                self.closePanels(except: .arrange)
-                self.arrangePanel.open(anchor: menuBar.perchButton)
-                return
-            }
-            self.closePanels(except: .search)
-            self.searchPanel.toggle(anchor: menuBar.perchButton)
-        }
-        menuBar.openSearch = openSearch
-        openSearchAction = openSearch
-        menuBar.searchShortcut = {
-            preferences.searchEnabled && !preferences.searchShortcutTaken ? preferences.searchShortcut : nil
-        }
         menuBar.usesDrawer = {
             preferences.drawerEnabled && permissions.hasScreenRecording && permissions.hasAccessibility
         }
-        hotKey = HotKey(action: openSearch)
-        Publishers.CombineLatest3(preferences.$searchEnabled, preferences.$searchShortcut, preferences.$isRecordingShortcut)
-            .sink { [weak self] enabled, shortcut, recording in
-                guard let self else { return }
-                let registered = self.hotKey.register(enabled && !recording ? shortcut : nil)
-                if !recording { preferences.searchShortcutTaken = enabled && !registered }
-            }
-            .store(in: &cancellables)
+
+        // Every icon is a Spotlight result; picking one opens its menu.
+        spotlight = SpotlightIndex(engine: engine)
 
         menuBar.openSettings = { [weak self] pane in
             self?.closePanels(except: nil)
@@ -187,13 +152,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private enum Panel { case drawer, arrange, search }
+    private enum Panel { case drawer, arrange }
 
     /// Only one of Perch's panels is open at a time.
     private func closePanels(except kept: Panel?) {
         if kept != .drawer { drawer.close() }
         if kept != .arrange { arrangePanel.close() }
-        if kept != .search { searchPanel.close() }
     }
 
     // MARK: - Actions for Spotlight and Shortcuts
@@ -203,12 +167,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if drawer.isOpen { return }
         if menuBar.toggleDrawer?() == true { return }
         menuBar.reveal()
-    }
-
-    /// Opens search; running it again leaves search open.
-    func searchIcons() {
-        if searchPanel.isOpen { return }
-        openSearchAction?()
     }
 
     func icons() async -> [MenuBarItem] {
@@ -237,9 +195,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
+    /// Picking a menu bar icon in Spotlight opens its menu.
+    func application(_ application: NSApplication, continue userActivity: NSUserActivity,
+                     restorationHandler: @escaping ([any NSUserActivityRestoring]) -> Void) -> Bool {
+        guard userActivity.activityType == CSSearchableItemActionType,
+              let key = userActivity.userInfo?[CSSearchableItemActivityIdentifier] as? String
+        else { return false }
+        openedFromSpotlight = Date()
+        Task {
+            if await openIcon(key: key) != .opened { NSSound.beep() }
+        }
+        return true
+    }
+
+    /// When Spotlight last opened an icon, so the reopen that comes with it
+    /// doesn't also show Settings.
+    private var openedFromSpotlight: Date?
+
     /// Opening Perch again (from Finder, Spotlight or the Dock) shows Settings,
     /// so there is always a way back in even if the menu bar icon is out of view.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if let opened = openedFromSpotlight, Date().timeIntervalSince(opened) < 2 { return false }
         settings.show(pane: nil)
         return false
     }

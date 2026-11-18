@@ -33,24 +33,6 @@ struct FeaturesPane: View {
             }
 
             Section {
-                Toggle(isOn: $preferences.searchEnabled) {
-                    Text("Search shortcut")
-                    Text("Press it anywhere, type part of an icon's name, and press Return to open it.")
-                }
-                if preferences.searchEnabled {
-                    LabeledContent {
-                        ShortcutRecorder(shortcut: $preferences.searchShortcut, recording: $preferences.isRecordingShortcut)
-                    } label: {
-                        Text("Shortcut")
-                        if preferences.searchShortcutTaken {
-                            Text("Another app already uses this shortcut. Pick a different one.")
-                                .foregroundStyle(.red)
-                        }
-                    }
-                }
-            }
-
-            Section {
                 LabeledContent {
                     HStack(spacing: 8) {
                         Text("Tight").font(.caption).foregroundStyle(.secondary)
@@ -178,59 +160,5 @@ private struct SpacingPreview: View {
         .padding(.vertical, 4)
         .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.primary.opacity(0.05)))
         .animation(.snappy(duration: 0.15), value: spacing)
-    }
-}
-
-/// Click, then press the shortcut you want. Escape cancels.
-private struct ShortcutRecorder: View {
-    @Binding var shortcut: Shortcut
-    @Binding var recording: Bool
-    @State private var monitor: Any?
-    @State private var resignObserver: NSObjectProtocol?
-
-    var body: some View {
-        Button {
-            recording ? stop() : start()
-        } label: {
-            Text(recording ? "Type shortcut…" : shortcut.displayString)
-                .font(.system(size: 12, weight: .medium).monospaced())
-                .frame(minWidth: 90)
-        }
-        .buttonStyle(.bordered)
-        .tint(recording ? .accentColor : nil)
-        .onDisappear(perform: stop)
-    }
-
-    private func start() {
-        recording = true
-        // Clicking away from Settings stops recording.
-        resignObserver = NotificationCenter.default.addObserver(
-            forName: NSWindow.didResignKeyNotification, object: NSApp.keyWindow, queue: .main
-        ) { _ in
-            MainActor.assumeIsolated { stop() }
-        }
-        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            if event.keyCode == 53 { // Escape
-                stop()
-                return nil
-            }
-            let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
-            // A shortcut needs at least one of ⌘ ⌥ ⌃ so plain typing never triggers it.
-            guard !modifiers.intersection([.command, .option, .control]).isEmpty else {
-                NSSound.beep()
-                return nil
-            }
-            shortcut = Shortcut(keyCode: UInt32(event.keyCode), modifiers: modifiers)
-            stop()
-            return nil
-        }
-    }
-
-    private func stop() {
-        if recording { recording = false }
-        if let monitor { NSEvent.removeMonitor(monitor) }
-        monitor = nil
-        if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) }
-        resignObserver = nil
     }
 }

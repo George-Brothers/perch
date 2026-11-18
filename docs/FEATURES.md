@@ -15,7 +15,7 @@ Perch is a light menu bar manager for macOS. The goal: the menu bar macOS should
 |---|---|
 | CPU while idle | about 0% |
 | Memory while idle | under 30 MB |
-| Opening the drawer, Arrange or search | under 0.2 s |
+| Opening the drawer or Arrange | under 0.2 s |
 | Icon pictures | only for icons that are new, changed size, or 30 min old (each capture flashes the purple dot) |
 
 ## Built
@@ -26,8 +26,8 @@ Perch is a light menu bar manager for macOS. The goal: the menu bar macOS should
 | Priorities | Each icon is Always show, Show when there's room, or Hidden. Perch ⌘-drags icons across the divider to match, on launch, priority change, display change, wake, unlock, and app launch or quit. |
 | Arrange | Three shelves; drag an icon to the one you want. Right-click for the same moves. |
 | Drawer (opt-in) | Hidden icons in a small bar under the menu bar. Needs Screen Recording; turned on in Settings → Features after an explanation. |
-| Search | ⌥⇧Space by default. Type, arrow keys, Return opens the icon's menu, even when hidden. |
-| Spotlight and Shortcuts | App Intents: Show Hidden Icons, Search Menu Bar Icons, Open Menu Bar Icon (any icon, by name). |
+| Spotlight | Every icon is a Core Spotlight item, re-indexed only when the set of icons changes. Picking one opens its menu, even when hidden. |
+| Shortcuts | App Intents: Show Hidden Icons, Open Menu Bar Icon (any icon, by name). |
 | Spacing | Slider for `NSStatusItemSpacing` and `NSStatusItemSelectionPadding`. Apps pick it up when they reopen; Perch offers to reopen them. |
 | Auto-hide | After a delay or a click outside. Never while a menu is open or the pointer is in the bar. |
 | Settings | General, Features, Icons, About. Launch at login, icon style. |
