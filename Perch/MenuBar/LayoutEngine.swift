@@ -708,6 +708,8 @@ final class LayoutEngine: ObservableObject {
     }
 
     private func observeTriggers() {
+        // The first hide waits for a real pass, so it hides only what doesn't fit.
+        menuBar.placeFirst = { [weak self] in await self?.arrange() }
         menuBar.onReady = { [weak self] in self?.scheduleArrange(after: 1) }
 
         preferences.$priorities
