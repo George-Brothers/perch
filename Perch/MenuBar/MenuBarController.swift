@@ -135,11 +135,30 @@ final class MenuBarController: NSObject, ObservableObject {
             apply()
             rehider.disarm()
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+        // Its menu opens wherever the icon is, so wait until it's on screen.
+        whenOnScreen(item, attempts: 20) { [weak self] in
             guard let self else { return }
-            // Re-read the icon now that it's on screen.
             ItemOpener.open(item)
             if !wasRevealed { self.collapseWhenMenuCloses() }
+        }
+    }
+
+    /// Runs `action` once the icon has moved on screen, checking every 50 ms
+    /// for up to `attempts` tries (then runs it anyway).
+    private func whenOnScreen(_ item: MenuBarItem, attempts: Int, _ action: @escaping () -> Void) {
+        let onScreen = AX.frame(of: item.element).map { frame in
+            NSScreen.screens.contains { $0.frame.minX <= frame.minX && frame.minX < $0.frame.maxX }
+        } ?? false
+        if onScreen || attempts <= 0 {
+            // A moment more for the move to settle.
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(80))
+                action()
+            }
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            self?.whenOnScreen(item, attempts: attempts - 1, action)
         }
     }
 
