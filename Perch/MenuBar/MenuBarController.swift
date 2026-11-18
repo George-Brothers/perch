@@ -52,6 +52,9 @@ final class MenuBarController: NSObject, ObservableObject {
     var toggleDrawer: (() -> Bool)?
     /// Runs once at launch while everything is still showing, before the first hide.
     var beforeFirstHide: (() async -> Void)?
+    var openSearch: (() -> Void)?
+    /// The search shortcut, shown in the right-click menu.
+    var searchShortcutTitle: (() -> String?)?
 
     var perchButton: NSStatusBarButton? { perchItem.button }
 
@@ -122,9 +125,9 @@ final class MenuBarController: NSObject, ObservableObject {
         }
     }
 
-    /// Opens a hidden icon picked from the drawer: shows the hidden icons just
+    /// Opens a hidden icon picked from the drawer or search: shows the hidden icons just
     /// long enough for its menu, then hides them again when the menu closes.
-    func openFromDrawer(_ item: MenuBarItem) {
+    func openTemporarily(_ item: MenuBarItem) {
         guard !isBusy else { return }
         let wasRevealed = visibility.isRevealed
         if !wasRevealed {
@@ -340,6 +343,9 @@ final class MenuBarController: NSObject, ObservableObject {
         let menu = NSMenu()
         let toggleTitle = visibility.isRevealed ? "Hide Icons" : "Show Hidden Icons"
         menu.addItem(withTitle: toggleTitle, action: #selector(menuToggle), keyEquivalent: "").target = self
+        let search = menu.addItem(withTitle: "Search Icons…", action: #selector(menuSearch), keyEquivalent: "")
+        search.target = self
+        if let shortcut = searchShortcutTitle?() { search.toolTip = shortcut }
         menu.addItem(withTitle: "Arrange Icons…", action: #selector(menuArrange), keyEquivalent: "").target = self
         menu.addItem(.separator())
         menu.addItem(withTitle: "Settings…", action: #selector(menuSettings), keyEquivalent: ",").target = self
@@ -354,6 +360,7 @@ final class MenuBarController: NSObject, ObservableObject {
     @objc private func menuToggle() {
         if toggleDrawer?() != true { toggle() }
     }
+    @objc private func menuSearch() { openSearch?() }
     @objc private func menuArrange() { openArrange?(perchItem.button) }
     @objc private func menuSettings() { openSettings?(nil) }
     @objc private func menuQuit() { NSApp.terminate(nil) }
