@@ -181,8 +181,8 @@ struct ArrangeBar: View {
         Text(item.displayName)
         Divider()
         switch row {
-        case .bar: Button("Hide") { engine.setPriority(.hidden, for: item) }
-        case .hidden: Button("Show in Menu Bar") { engine.setPriority(.shown, for: item) }
+        case .bar: Button("Hide") { engine.place(item, .before(.divider, shown: false), priority: .hidden) }
+        case .hidden: Button("Show in Menu Bar") { engine.place(item, .before(.divider, shown: true), priority: .shown) }
         case .off: Button("Turn On in System Settings…") { explainOff(item) }
         }
     }
