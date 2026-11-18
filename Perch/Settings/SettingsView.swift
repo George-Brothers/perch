@@ -53,7 +53,7 @@ struct IconsPane: View {
             Task {
                 let items = await engine.rescan()
                 if preferences.drawerEnabled {
-                    await images.capture(items.filter { $0.section != .notShowing })
+                    await images.capture(items.filter { $0.section != .notShowing && images.needsCapture($0) })
                 }
             }
         }
