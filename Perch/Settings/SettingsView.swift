@@ -48,7 +48,13 @@ struct IconsPane: View {
         }
         .formStyle(.grouped)
         .onAppear {
+            engine.hold(true, for: .settings)
             Task { await images.refresh?() }
+        }
+        // Moves made here wait until you leave the pane or close Settings.
+        .onDisappear { engine.hold(false, for: .settings) }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { note in
+            if (note.object as? NSWindow)?.title == SettingsWindowController.title { engine.hold(false, for: .settings) }
         }
     }
 }

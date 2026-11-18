@@ -92,11 +92,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         arrangePanel.onOpen = {
-            engine.holdsMoves = true
+            engine.hold(true, for: .arrange)
             Task { await images.refresh?() }
         }
         // Moves that need the bar to reset happen together once Arrange closes.
-        arrangePanel.onClose = { engine.holdsMoves = false }
+        arrangePanel.onClose = { engine.hold(false, for: .arrange) }
         // Perch's icon stays in the bar until it can tell empty menu bar space
         // from an icon, which needs Accessibility.
         permissions.$hasAccessibility

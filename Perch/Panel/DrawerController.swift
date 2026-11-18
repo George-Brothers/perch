@@ -132,7 +132,9 @@ final class DrawerController {
 
     private func position(_ panel: NSPanel) {
         let size = panel.frame.size
-        let anchorFrame = anchor?()
+        // While Control Center restarts, Perch's items can briefly report a
+        // frame away from the menu bar; hang from the top of the screen then.
+        let anchorFrame = anchor?().flatMap { MenuBarGeometry.isInMenuBar(NSPoint(x: $0.midX, y: $0.midY)) ? $0 : nil }
         guard let screen = anchorFrame.flatMap(PanelAnchorScreen.of) ?? NSScreen.main else { return }
         let barBottom = screen.frame.maxY - MenuBarGeometry.menuBarHeight(for: screen)
         let visible = screen.frame

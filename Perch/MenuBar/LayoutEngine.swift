@@ -32,6 +32,8 @@ final class LayoutEngine: ObservableObject {
 
 
     init(preferences: Preferences, permissions: Permissions, menuBar: MenuBarController) {
+        // Moves no longer wait for an app's next launch; drop what older versions saved.
+        UserDefaults.standard.removeObject(forKey: "pendingMoves")
         self.preferences = preferences
         self.permissions = permissions
         self.menuBar = menuBar
@@ -60,16 +62,25 @@ final class LayoutEngine: ObservableObject {
     /// What's waiting, for Arrange to draw instead of the bar as it is.
     @Published private(set) var queuedBar: [Spot]?
 
-    /// While Arrange is open, moves that need the bar to reset wait until it
-    /// closes: one reset however many icons you move. (Each reset makes macOS
-    /// redraw its own icons, and Focus shows its name again.) Moves that only
-    /// need the divider still happen right away.
-    var holdsMoves = false {
-        didSet {
-            guard holdsMoves != oldValue else { return }
-            if !holdsMoves, queued != nil { scheduleArrange(after: 0.05) }
-        }
+    /// The icons in the bar when the current order was started. An icon
+    /// that shows up later (an app that just opened) isn't part of it: it
+    /// stays where macOS put it, with its own priority.
+    private var queuedFrom: Set<String> = []
+
+    /// What can hold moves: Arrange and Settings → Icons, while they're open.
+    enum Holder { case arrange, settings }
+
+    /// While Arrange (or Settings → Icons) is open, moves that need the bar to
+    /// reset wait until it closes: one reset however many icons you move.
+    /// (Each reset makes macOS redraw its own icons, and Focus shows its name
+    /// again.) Moves that only need the divider still happen right away.
+    func hold(_ on: Bool, for holder: Holder) {
+        let wasHolding = holdsMoves
+        if on { holders.insert(holder) } else { holders.remove(holder) }
+        if wasHolding, !holdsMoves, queued != nil { scheduleArrange(after: 0.05) }
     }
+    private var holders: Set<Holder> = []
+    private var holdsMoves: Bool { !holders.isEmpty }
     /// Moves are waiting for Arrange to close.
     @Published private(set) var waitsForClose = false
 
@@ -81,6 +92,7 @@ final class LayoutEngine: ObservableObject {
     @discardableResult
     func place(_ item: MenuBarItem, _ placement: Placement) -> Bool {
         guard case .before(let anchor, let shown) = placement else { return false }
+        if queued == nil { queuedFrom = Set(items.filter { $0.isInMenuBar && $0.isMovable }.map(\.key)) }
         var order = queued ?? shownOrder(in: items)
         order.removeAll { $0 == .icon(item.key) }
         if shown { order.insert(.icon(item.key), at: insertionIndex(for: anchor, in: order)) }
@@ -97,15 +109,19 @@ final class LayoutEngine: ObservableObject {
         return true
     }
 
-    /// Where to put Perch's own item (its line or icon), from Arrange.
-    func placePerch(_ placement: Placement) {
-        guard case .before(let anchor, _) = placement else { return }
+    /// Where to put Perch's own item (its line or icon), from Arrange. False
+    /// if Perch can't put it there.
+    @discardableResult
+    func placePerch(_ placement: Placement) -> Bool {
+        guard case .before(let anchor, _) = placement else { return false }
+        if queued == nil { queuedFrom = Set(items.filter { $0.isInMenuBar && $0.isMovable }.map(\.key)) }
         var order = queued ?? shownOrder(in: items)
         order.removeAll { $0 == .perch }
         order.insert(.perch, at: insertionIndex(for: anchor, in: order))
-        guard plan(order, in: items) != nil else { return }
+        guard plan(order, in: items) != nil else { return false }
         queued = order
         scheduleArrange(after: 0.02)
+        return true
     }
 
     /// What's meant to show now, left to right.
@@ -227,9 +243,11 @@ final class LayoutEngine: ObservableObject {
     @Published private(set) var iconGap: CGFloat = 8
 
     /// Tries again in 2 s, up to five times; the next trigger starts over.
+    /// Moves you made in Arrange keep waiting as long as it takes: applying
+    /// them later, on some unrelated trigger, would surprise you.
     private func deferOrGiveUp() {
         deferrals += 1
-        if deferrals <= 5 {
+        if deferrals <= 5 || queued != nil {
             scheduleArrange(after: 2)
         } else {
             log.notice("a menu stayed open; skipping this pass")
@@ -244,6 +262,11 @@ final class LayoutEngine: ObservableObject {
     private func arrange() async {
         guard !isArranging else {
             arrangeAgain = true
+            return
+        }
+        // While the screen is locked the bar isn't drawn; try again later.
+        if Self.screenIsLocked {
+            if queued != nil { scheduleArrange(after: 5) }
             return
         }
         // Recreating the divider would close an open menu; wait for it.
@@ -265,6 +288,8 @@ final class LayoutEngine: ObservableObject {
 
         var current = await scan()
         if let order = queued {
+            // A drop during this pass replaces the order; keep the new one.
+            func done() { if queued == order { queued = nil } }
             if let plan = plan(order, in: current) {
                 if plan.writes.isEmpty {
                     // Only the divider and Perch's own items move: right away.
@@ -274,7 +299,7 @@ final class LayoutEngine: ObservableObject {
                         current = await scan()
                     }
                     setPriorities(order, in: current)
-                    queued = nil
+                    done()
                 } else if holdsMoves {
                     log.notice("\(plan.writes.count, privacy: .public) icons move when Arrange closes")
                     waitsForClose = true
@@ -282,14 +307,14 @@ final class LayoutEngine: ObservableObject {
                     return
                 } else {
                     await commit(plan, order, in: current)
-                    queued = nil
+                    done()
                     current = await scan()
                 }
             } else {
                 log.notice("the order from Arrange no longer fits the bar")
-                queued = nil
+                done()
             }
-            waitsForClose = false
+            waitsForClose = queued != nil && holdsMoves
         }
         if placeDivider(in: current) {
             await menuBar.settle()
@@ -297,6 +322,11 @@ final class LayoutEngine: ObservableObject {
         } else {
             await scan()
         }
+    }
+
+    /// Whether the login window is covering the screen.
+    private static var screenIsLocked: Bool {
+        (CGSessionCopyCurrentDictionary() as? [String: Any])?["CGSSessionScreenIsLocked"] as? Bool ?? false
     }
 
     /// Scans until two scans in a row agree (up to about 1.5 s), then
@@ -342,7 +372,7 @@ final class LayoutEngine: ObservableObject {
                 // A waiting move's saved spot isn't where the icon is yet.
                 Entry(kind: item.isFixed ? .fixed : .icon(item.key), x: item.frame.midX,
                       width: item.frame.width,
-                      position: pendingMoves[item.key] == nil ? slots[item.key]?.value : nil)
+                      position: slots[item.key]?.value)
             }
         if let perch = menuBar.perchFrame() {
             list.append(Entry(kind: .perch, x: perch.midX, width: perch.width, position: menuBar.perchPosition))
@@ -383,28 +413,6 @@ final class LayoutEngine: ObservableObject {
 
     // MARK: Spots from Arrange
 
-    /// A move that happens the next time the icon's app opens: macOS reads an
-    /// icon's saved spot only then, and Perch never restarts apps.
-    struct PendingMove: Codable, Equatable {
-        let bundleID: String
-        let name: String
-        /// Moving into Perch's bar. Until it does, the icon keeps its room in
-        /// the menu bar, so the icons left of it don't get hidden with it.
-        let hides: Bool
-        /// The spot it had before, so moving it back undoes the move exactly.
-        let previous: Double?
-    }
-
-    private static let pendingKey = "pendingMoves"
-
-    /// Icon key → its waiting move.
-    @Published private(set) var pendingMoves: [String: PendingMove] = {
-        guard let data = UserDefaults.standard.data(forKey: pendingKey) else { return [:] }
-        return (try? JSONDecoder().decode([String: PendingMove].self, from: data)) ?? [:]
-    }() {
-        didSet { UserDefaults.standard.set(try? JSONEncoder().encode(pendingMoves), forKey: Self.pendingKey) }
-    }
-
     /// Icons in Perch's bar in your order (Perch keeps it, so reordering them
     /// never touches their apps). Icons you haven't ordered follow, in bar order.
     func inHiddenOrder(_ items: [MenuBarItem]) -> [MenuBarItem] {
@@ -433,7 +441,14 @@ final class LayoutEngine: ObservableObject {
 
     /// New saved spots that put the bar in an order, and where Perch's item goes.
     private struct Plan {
-        var writes: [(slot: StatusItemPositions.Slot, value: Double, name: String)] = []
+        struct Write {
+            let key: String
+            /// The icon's saved spot as it was, to put back if the move fails.
+            let slot: StatusItemPositions.Slot
+            let value: Double
+            let name: String
+        }
+        var writes: [Write] = []
         var perch: Double?
     }
 
@@ -459,7 +474,7 @@ final class LayoutEngine: ObservableObject {
         let shown = Set(order)
         let hidden = list.indices.filter { i in
             guard case .icon(let key) = list[i].kind else { return false }
-            return byKey[key]?.isMovable == true && !shown.contains(.icon(key))
+            return byKey[key]?.isMovable == true && !shown.contains(.icon(key)) && queuedFrom.contains(key)
         }
         // Indices into `list`, in the order they should end up.
         let sequence = hidden + order.compactMap { index[$0] } + list.indices.filter { list[$0].kind == .fixed }
@@ -481,6 +496,8 @@ final class LayoutEngine: ObservableObject {
             guard let weight = weights[s] else { continue }
             best[s] = weight
             for t in 0..<s where weights[t] != nil && sequence[t] < sequence[s] && best[t] + weight > best[s] {
+                // Two that stay must also have saved spots in order, or nothing fits between them.
+                if let a = known(sequence[t]), let b = known(sequence[s]), a <= b { continue }
                 best[s] = best[t] + weight
                 previous[s] = t
             }
@@ -510,17 +527,28 @@ final class LayoutEngine: ObservableObject {
             var upper = left.flatMap { known($0) ?? inside.first.flatMap(known) }
             var lower = right.flatMap { known($0) ?? inside.last.flatMap(known) }
             let count = Double(movers.count)
+            // Next to an icon whose spot Perch can't read, hug the known side:
+            // within 0.05, and never past half the way to the next known spot
+            // beyond that icon.
+            func hugAbove(_ l: Double, beyond i: Int) -> Double {
+                let outer = list[..<i].last { !$0.isGuess && $0.position != nil }?.position
+                return l + min(0.05, ((outer ?? l + 0.1) - l) / 2)
+            }
+            func hugBelow(_ u: Double, beyond i: Int) -> Double {
+                let outer = list[(i + 1)...].first { !$0.isGuess && $0.position != nil }
+                return u - min(0.05, (u - (outer?.position ?? u - 0.1)) / 2)
+            }
             switch (upper, lower) {
             case let (u?, l?) where u > l:
                 break
             case let (u?, l?):
-                if let left, known(left) == nil { upper = l + 0.05 }
-                else if let right, known(right) == nil { lower = u - 0.05 }
+                if let left, known(left) == nil { upper = hugAbove(l, beyond: left) }
+                else if let right, known(right) == nil { lower = hugBelow(u, beyond: right) }
                 else { return nil }
             case let (nil, l?):
-                upper = left == nil ? l + count + 1 : l + 0.05
+                upper = left.map { hugAbove(l, beyond: $0) } ?? l + count + 1
             case let (u?, nil):
-                lower = right == nil ? u - count - 1 : u - 0.05
+                lower = right.map { hugBelow(u, beyond: $0) } ?? u - count - 1
             case (nil, nil):
                 // Left of an icon whose spot nobody knows: well past every known spot.
                 guard left == nil else { return nil }
@@ -535,7 +563,7 @@ final class LayoutEngine: ObservableObject {
                     result.perch = value
                 case .icon(let key):
                     guard let slot = slots[key], !slot.isPrivate else { return nil }
-                    result.writes.append((slot, value, byKey[key]?.displayName ?? key))
+                    result.writes.append(.init(key: key, slot: slot, value: value, name: byKey[key]?.displayName ?? key))
                 case .fixed:
                     return nil
                 }
@@ -548,35 +576,49 @@ final class LayoutEngine: ObservableObject {
     /// draws every app's icons and puts each at its saved spot when it starts,
     /// so they move without their apps restarting. Then checks they landed.
     private func commit(_ plan: Plan, _ order: [Spot], in items: [MenuBarItem]) async {
+        // All or nothing: if one spot can't be saved, put back the ones that
+        // were, so the next restart (or login) doesn't apply half a move.
+        var saved: [Plan.Write] = []
         for write in plan.writes {
-            if await StatusItemPositions.write(write.value, for: write.slot, within: 1) {
-                log.notice("saved a new spot for \(write.name, privacy: .public)")
-            } else {
-                log.notice("couldn't save a spot for \(write.name, privacy: .public) in time")
+            guard await StatusItemPositions.write(write.value, for: write.slot, within: 1) else {
+                log.notice("couldn't save a spot for \(write.name, privacy: .public); undoing")
+                for done in saved { await StatusItemPositions.restore(done.slot) }
+                notice = "Perch couldn't save a new spot for \(write.name). Nothing moved."
+                return
             }
+            saved.append(write)
         }
+        log.notice("saved \(saved.count, privacy: .public) new spots")
         if let position = plan.perch { menuBar.movePerch(to: position) }
-        setPriorities(order, in: items)
+        let before = items.filter(\.isInMenuBar).count
         await AppRestarter.restartControlCenter()
         await menuBar.settle()
-        let after = await settledScan()
-        // Control Center applied every saved spot, including older waiting ones.
-        if !pendingMoves.isEmpty { pendingMoves = [:] }
+        var after = await settledScan()
+        // Control Center can take a few seconds to come back; check once it has.
+        for _ in 0..<16 where after.filter(\.isInMenuBar).count < before - 1 {
+            try? await Task.sleep(for: .milliseconds(500))
+            after = await settledScan()
+        }
+        setPriorities(order, in: after)
         let wrong = misplaced(order, in: after)
-        for key in wrong where !order.contains(.icon(key)) {
+        for key in wrong {
+            // Undo its saved spot, so a later restart doesn't move it by surprise.
+            if let write = saved.first(where: { $0.key == key }) {
+                await StatusItemPositions.restore(write.slot)
+            }
             // An icon marked hidden among the shown ones would take its neighbors along.
-            preferences.setPriority(.shown, for: key)
+            if !order.contains(.icon(key)) { preferences.setPriority(.shown, for: key) }
         }
         if let key = wrong.first {
             let name = after.first { $0.key == key }?.displayName ?? key
             notice = "Perch couldn't move \(name) there. ⌘-drag it in the menu bar instead."
         }
-        log.notice("restarted Control Center: \(plan.writes.count, privacy: .public) spots saved, \(wrong.count, privacy: .public) icons out of place")
+        log.notice("restarted Control Center: \(wrong.count, privacy: .public) icons out of place")
     }
 
-    /// Marks what's in `order` shown and the other movable icons hidden.
+    /// Marks what's in `order` shown and the other icons that were part of it hidden.
     private func setPriorities(_ order: [Spot], in items: [MenuBarItem]) {
-        for item in items where item.isInMenuBar && item.isMovable {
+        for item in items where item.isInMenuBar && item.isMovable && queuedFrom.contains(item.key) {
             let priority: IconPriority = order.contains(.icon(item.key)) ? .shown : .hidden
             if preferences.priority(for: item.key) != priority { preferences.setPriority(priority, for: item.key) }
         }
@@ -602,7 +644,7 @@ final class LayoutEngine: ObservableObject {
         // Hidden ones must be left of everything that shows.
         let firstShown = spots.firstIndex { $0.map(shown.contains) == true } ?? list.count
         for (i, entry) in list.enumerated() where i > firstShown {
-            guard case .icon(let key) = entry.kind, !shown.contains(.icon(key)),
+            guard case .icon(let key) = entry.kind, !shown.contains(.icon(key)), queuedFrom.contains(key),
                   items.first(where: { $0.key == key })?.isMovable == true else { continue }
             result.append(key)
         }
@@ -639,8 +681,7 @@ final class LayoutEngine: ObservableObject {
         for entry in movable.reversed() {
             let cost = entry.width + gap
             if case .icon(let key) = entry.kind {
-                // An icon waiting to move into Perch's bar still takes its room.
-                let hides = preferences.priority(for: key) == .hidden && pendingMoves[key]?.hides != true
+                let hides = preferences.priority(for: key) == .hidden
                 guard !hides, cost <= room else { break }
             } else if cost > room {
                 break
@@ -761,13 +802,6 @@ final class LayoutEngine: ObservableObject {
         for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
             observers.append(workspace.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
                 MainActor.assumeIsolated {
-                    // An app with a waiting move opened: its icons are in their new spots.
-                    if name == NSWorkspace.didLaunchApplicationNotification,
-                       let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
-                       let bundleID = app.bundleIdentifier, let self {
-                        let moved = self.pendingMoves.filter { $0.value.bundleID == bundleID }.map(\.key)
-                        for key in moved { self.pendingMoves[key] = nil }
-                    }
                     self?.scheduleArrange(after: 3)
                 }
             })
