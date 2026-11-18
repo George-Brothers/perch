@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Shown once, the first time Perch runs: the three things to know, and
-/// Accessibility if Perch doesn't have it yet.
+/// Accessibility if Perch doesn't have it yet. One line each.
 struct WelcomeView: View {
     @ObservedObject var permissions: Permissions
     let onDone: () -> Void
@@ -10,34 +10,33 @@ struct WelcomeView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Perch is in your menu bar")
-                .font(.system(size: 15, weight: .semibold))
-
-            VStack(alignment: .leading, spacing: 10) {
-                step("cursorarrow.click", "Click empty space in the menu bar to see icons that don't fit.")
-                step("contextualmenu.and.cursorarrow", "Right-click it to put your icons in order.")
-                step("magnifyingglass", "Press ⌘Space and type an icon's name to open it.")
+            Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 8) {
+                step("Click empty menu bar", "Hidden icons")
+                step("Right-click it", "Arrange")
+                step("⌘Space, an icon's name", "Open it")
             }
+            .font(.system(size: 13))
 
             HStack {
                 if !permissions.hasAccessibility {
-                    Text("Perch needs Accessibility to see your icons.")
-                        .font(.system(size: 11))
+                    Text("Perch needs Accessibility first.")
+                        .font(.system(size: 12))
                         .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 12)
                     Button("Allow…") { permissions.requestAccessibility() }
                         .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
                 } else {
                     Spacer()
                     Button("Done", action: onDone)
                         .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
                         .keyboardShortcut(.defaultAction)
                 }
             }
         }
-        .padding(18)
-        .frame(width: 330, alignment: .leading)
+        .padding(16)
+        .fixedSize()
         .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
@@ -47,15 +46,10 @@ struct WelcomeView: View {
         .onAppear { permissions.refresh() }
     }
 
-    private func step(_ symbol: String, _ text: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Image(systemName: symbol)
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-                .frame(width: 20)
-            Text(text)
-                .font(.system(size: 13))
-                .fixedSize(horizontal: false, vertical: true)
+    private func step(_ how: String, _ what: String) -> some View {
+        GridRow {
+            Text(how).foregroundStyle(.secondary)
+            Text(what)
         }
     }
 }
