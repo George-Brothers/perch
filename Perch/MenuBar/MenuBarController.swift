@@ -296,7 +296,7 @@ final class MenuBarController: NSObject, ObservableObject {
         image?.isTemplate = true
         button.image = image
         if let width = image?.size.width {
-            perchItem.length = ceil(width) + 2
+            perchItem.length = ceil(width)
         }
     }
 
