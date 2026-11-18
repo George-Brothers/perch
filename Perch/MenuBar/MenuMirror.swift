@@ -27,7 +27,8 @@ enum MenuMirror {
         let path: [Int]
         /// Titles along the same path, to check the real menu still matches.
         let titles: [String]
-        /// Every title in each menu along the path, as copied.
+        /// What tells apart each item in each menu along the path (title and
+        /// shortcut), as copied.
         let levels: [[String]]
     }
 
@@ -121,9 +122,9 @@ enum MenuMirror {
 
     private nonisolated static func read(_ menu: AXUIElement, path: [Int], titles: [String], levels: [[String]]) -> [Entry] {
         let children = AX.elements(menu, kAXChildrenAttribute)
-        let levels = levels + [children.map { AX.string($0, kAXTitleAttribute) ?? "" }]
+        let levels = levels + [children.map(signature)]
         return children.enumerated().map { index, element in
-            let title = levels[levels.count - 1][index]
+            let title = AX.string(element, kAXTitleAttribute) ?? ""
             let enabled = AX.raw(element, kAXEnabledAttribute) as? Bool ?? true
             let submenu = AX.elements(element, kAXChildrenAttribute).first { AX.string($0, kAXRoleAttribute) == "AXMenu" }
             let rawModifiers = AX.raw(element, "AXMenuItemCmdModifiers") as? Int ?? 0
@@ -205,6 +206,15 @@ enum MenuMirror {
     }
 
     /// Opens the real menu off screen again and presses the item at `path`.
+    /// An item's title and shortcut: two items can share a title ("Disconnect")
+    /// but not usually both. A checkmark isn't part of it; it flips.
+    private nonisolated static func signature(_ element: AXUIElement) -> String {
+        let title = AX.string(element, kAXTitleAttribute) ?? ""
+        let key = AX.string(element, "AXMenuItemCmdChar") ?? ""
+        let modifiers = AX.raw(element, "AXMenuItemCmdModifiers") as? Int ?? 0
+        return "\(title)\u{1F}\(key)\u{1F}\(key.isEmpty ? 0 : modifiers)"
+    }
+
     private nonisolated static func press(path: [Int], titles: [String], levels: [[String]], in element: AXUIElement) {
         AXUIElementSetMessagingTimeout(element, 0.3)
         _ = AXUIElementPerformAction(element, kAXPressAction as CFString)
@@ -221,15 +231,19 @@ enum MenuMirror {
             let isLast = depth == path.count - 1
             // The menu may have changed since it was copied (an app can
             // reorder its submenus, or list disks that come and go). Take the
-            // one item with the title it had; with no title, or two items with
-            // that title, only if this menu is exactly as copied. Never a guess.
+            // one item with the title and shortcut it had, if that's unique
+            // both now and in the copy (if the one you picked is gone, its twin
+            // isn't it). With no title, or twins, only if this menu is exactly
+            // as copied. Never a guess.
             let title = depth < titles.count ? titles[depth] : ""
-            let now = items.map { AX.string($0, kAXTitleAttribute) ?? "" }
-            let matches = items.indices.filter { now[$0] == title }
+            let copied = depth < levels.count ? levels[depth] : []
+            let picked = index < copied.count ? copied[index] : nil
+            let now = items.map(signature)
+            let matches = items.indices.filter { now[$0] == picked }
             var found: AXUIElement?
-            if !title.isEmpty, matches.count == 1 {
+            if !title.isEmpty, let picked, matches.count == 1, copied.filter({ $0 == picked }).count == 1 {
                 found = items[matches[0]]
-            } else if depth < levels.count, now == levels[depth], index < items.count {
+            } else if now == copied, index < items.count {
                 found = items[index]
             }
             guard let next = found else { break }

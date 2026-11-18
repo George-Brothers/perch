@@ -66,6 +66,8 @@ final class LayoutEngine: ObservableObject {
     /// that shows up later (an app that just opened) isn't part of it: it
     /// stays where macOS put it, with its own priority.
     private(set) var queuedFrom: Set<String> = []
+    /// Goes up with every accepted drop, so a pass clears only the batch it applied.
+    private var queuedRevision = 0
 
     /// What can hold moves: Arrange and Settings → Icons, while they're open.
     enum Holder { case arrange, settings }
@@ -92,6 +94,10 @@ final class LayoutEngine: ObservableObject {
     @discardableResult
     func place(_ item: MenuBarItem, _ placement: Placement) -> Bool {
         guard case .before(let anchor, let shown) = placement else { return false }
+        guard !MenuBarSpacing.isApplying else {
+            notice = "Perch is restarting to apply the new spacing. Try again in a moment."
+            return false
+        }
         // The order and the icons it covers change together, and only if the drop is accepted.
         var members = queued == nil ? Set(items.filter { $0.isInMenuBar && $0.isMovable }.map(\.key)) : queuedFrom
         var order = queued.map { withNewcomers($0, into: &members) } ?? shownOrder(in: items)
@@ -106,6 +112,7 @@ final class LayoutEngine: ObservableObject {
         if !shown { setHiddenOrder(item.key, before: anchor, shown: order) }
         notice = nil
         queuedFrom = members
+        queuedRevision += 1
         queued = order
         // Right away: you just dropped it.
         scheduleArrange(after: 0.02)
@@ -117,6 +124,10 @@ final class LayoutEngine: ObservableObject {
     @discardableResult
     func placePerch(_ placement: Placement) -> Bool {
         guard case .before(let anchor, _) = placement else { return false }
+        guard !MenuBarSpacing.isApplying else {
+            notice = "Perch is restarting to apply the new spacing. Try again in a moment."
+            return false
+        }
         var members = queued == nil ? Set(items.filter { $0.isInMenuBar && $0.isMovable }.map(\.key)) : queuedFrom
         var order = queued.map { withNewcomers($0, into: &members) } ?? shownOrder(in: items)
         order.removeAll { $0 == .perch }
@@ -127,6 +138,7 @@ final class LayoutEngine: ObservableObject {
         }
         notice = nil
         queuedFrom = members
+        queuedRevision += 1
         queued = order
         scheduleArrange(after: 0.02)
         return true
@@ -322,9 +334,10 @@ final class LayoutEngine: ObservableObject {
         // every icon. Moves wait until the permission is back.
         guard permissions.hasAccessibility else { return false }
         if let order = queued {
-            // A drop during this pass replaces the order; keep the new one.
-            func done() { if queued == order { queued = nil } }
-            if let plan = plan(order, in: current) {
+            // A drop during this pass replaces the batch; keep the new one.
+            let members = queuedFrom, revision = queuedRevision
+            func done() { if queuedRevision == revision { queued = nil } }
+            if let plan = plan(order, in: current, members: members) {
                 if plan.writes.isEmpty {
                     // Only the divider and Perch's own items move: right away.
                     if let position = plan.perch {
@@ -332,7 +345,7 @@ final class LayoutEngine: ObservableObject {
                         await menuBar.settle()
                         current = await scan()
                     }
-                    setPriorities(order, in: current)
+                    setPriorities(order, in: current, members: members)
                     done()
                 } else if holdsMoves {
                     log.notice("\(plan.writes.count, privacy: .public) icons move when Arrange closes")
@@ -340,9 +353,11 @@ final class LayoutEngine: ObservableObject {
                     // The divider waits too: it goes by the order you set.
                     return true
                 } else {
-                    await commit(plan, order, in: current)
+                    await commit(plan, order, members: members, in: current)
                     done()
                     current = await scan()
+                    // Accessibility can go while Control Center restarts.
+                    guard permissions.hasAccessibility else { return false }
                 }
             } else {
                 log.notice("the order from Arrange no longer fits the bar")
@@ -614,7 +629,7 @@ final class LayoutEngine: ObservableObject {
     /// Saves the new spots and restarts Control Center once: on macOS 26 it
     /// draws every app's icons and puts each at its saved spot when it starts,
     /// so they move without their apps restarting. Then checks they landed.
-    private func commit(_ plan: Plan, _ order: [Spot], in items: [MenuBarItem]) async {
+    private func commit(_ plan: Plan, _ order: [Spot], members: Set<String>, in items: [MenuBarItem]) async {
         // All or nothing: if one spot can't be saved, put back the ones that
         // were, so the next restart (or login) doesn't apply half a move.
         var saved: [Plan.Write] = []
@@ -653,28 +668,40 @@ final class LayoutEngine: ObservableObject {
             try? await Task.sleep(for: .milliseconds(500))
             after = await settledScan()
         }
-        setPriorities(order, in: after)
+        let previous = Dictionary(uniqueKeysWithValues: members.map { ($0, preferences.priority(for: $0)) })
+        setPriorities(order, in: after, members: members)
         // One that never came back can't be checked: treat it as out of place.
         let missing = saved.map(\.key).filter { key in !after.contains { $0.key == key && $0.isInMenuBar } }
-        let wrong = missing + misplaced(order, in: after, moved: movedKeys)
+        let wrong = missing + misplaced(order, in: after, moved: movedKeys, members: members)
+        var stuck: [String] = []
         for key in wrong {
             // Undo its saved spot, so a later restart doesn't move it by surprise.
             if let write = saved.first(where: { $0.key == key }), !(await StatusItemPositions.restore(write.slot)) {
                 log.error("couldn't put back the spot for \(write.name, privacy: .public)")
+                stuck.append(write.name)
             }
-            // An icon marked hidden among the shown ones would take its neighbors along.
-            if !order.contains(.icon(key)) { preferences.setPriority(.shown, for: key) }
+            if !order.contains(.icon(key)) {
+                // An icon marked hidden among the shown ones would take its neighbors along.
+                preferences.setPriority(.shown, for: key)
+            } else if let was = previous[key], preferences.priority(for: key) != was {
+                // Its old spot is back, so its old priority goes with it.
+                preferences.setPriority(was, for: key)
+            }
         }
         if let key = wrong.first {
             let name = after.first { $0.key == key }?.displayName ?? saved.first { $0.key == key }?.name ?? key
             notice = "Perch couldn't move \(name) there. ⌘-drag it in the menu bar instead."
+            if !stuck.isEmpty {
+                notice! += " Perch couldn't put back \(stuck.joined(separator: ", ")) either; those may move the next time the menu bar resets."
+            }
         }
         log.notice("restarted Control Center: \(wrong.count, privacy: .public) icons out of place")
     }
 
     /// Marks what's in `order` shown and the other icons that were part of it hidden.
-    private func setPriorities(_ order: [Spot], in items: [MenuBarItem]) {
-        for item in items where item.isInMenuBar && item.isMovable && queuedFrom.contains(item.key) {
+    private func setPriorities(_ order: [Spot], in items: [MenuBarItem], members: Set<String>? = nil) {
+        let members = members ?? queuedFrom
+        for item in items where item.isInMenuBar && item.isMovable && members.contains(item.key) {
             let priority: IconPriority = order.contains(.icon(item.key)) ? .shown : .hidden
             if preferences.priority(for: item.key) != priority { preferences.setPriority(priority, for: item.key) }
         }
@@ -683,7 +710,7 @@ final class LayoutEngine: ObservableObject {
     /// Icons that didn't end up where `order` says. `moved` are the ones given
     /// new spots: when it's unclear which icons are out of place, blame those,
     /// not ones Perch left alone.
-    private func misplaced(_ order: [Spot], in items: [MenuBarItem], moved: Set<String>) -> [String] {
+    private func misplaced(_ order: [Spot], in items: [MenuBarItem], moved: Set<String>, members: Set<String>) -> [String] {
         let shown = Set(order)
         // Left to right: what should show, and the icons that should be hidden.
         let seen = entries(for: items).compactMap { entry -> (spot: Spot, shows: Bool)? in
@@ -692,7 +719,7 @@ final class LayoutEngine: ObservableObject {
             case .fixed: return nil
             case .icon(let key):
                 if shown.contains(.icon(key)) { return (.icon(key), true) }
-                guard queuedFrom.contains(key), items.first(where: { $0.key == key })?.isMovable == true else { return nil }
+                guard members.contains(key), items.first(where: { $0.key == key })?.isMovable == true else { return nil }
                 return (.icon(key), false)
             }
         }
@@ -700,48 +727,51 @@ final class LayoutEngine: ObservableObject {
             if case .icon(let key) = spot, moved.contains(key) { return 1 }
             return 1000
         }
+        // Shown spots in `landed` that are in order with `order`, and their
+        // weight: the longest such run, so one icon out of place doesn't make
+        // every icon after it look wrong too.
+        func inOrder(_ landed: [Spot]) -> (Set<Spot>, Int) {
+            let wanted = order.filter(landed.contains)
+            let n = wanted.count, m = landed.count
+            var best = Array(repeating: Array(repeating: 0, count: m + 1), count: n + 1)
+            for i in stride(from: n - 1, through: 0, by: -1) {
+                for j in stride(from: m - 1, through: 0, by: -1) {
+                    best[i][j] = wanted[i] == landed[j]
+                        ? best[i + 1][j + 1] + weight(wanted[i])
+                        : max(best[i + 1][j], best[i][j + 1])
+                }
+            }
+            var kept = Set<Spot>()
+            var i = 0, j = 0
+            while i < n, j < m {
+                if wanted[i] == landed[j], best[i][j] == best[i + 1][j + 1] + weight(wanted[i]) {
+                    kept.insert(wanted[i]); i += 1; j += 1
+                } else if best[i + 1][j] >= best[i][j + 1] {
+                    i += 1
+                } else {
+                    j += 1
+                }
+            }
+            return (kept, best[0][0])
+        }
+
+        // Hidden icons belong left of everything that shows. Try every line
+        // between the two and keep the one that, with the shown order after
+        // it, blames the fewest icons Perch left alone.
+        var bestSplit = 0, bestCost = Int.max, bestKept = Set<Spot>()
+        for split in 0...seen.count {
+            var cost = 0
+            for (k, entry) in seen.enumerated() where (k < split) == entry.shows { cost += weight(entry.spot) }
+            let shownAfter = seen[split...].filter(\.shows).map(\.spot)
+            let (kept, keptWeight) = inOrder(shownAfter)
+            cost += shownAfter.reduce(0) { $0 + weight($1) } - keptWeight
+            if cost < bestCost { bestSplit = split; bestCost = cost; bestKept = kept }
+        }
         var result: [String] = []
-
-        // Hidden icons belong left of everything that shows. Where they're
-        // mixed, draw the line that blames the fewest icons Perch left alone.
-        var split = 0
-        var cost = seen.filter { !$0.shows }.reduce(0) { $0 + weight($1.spot) }
-        var running = cost
         for (k, entry) in seen.enumerated() {
-            running += entry.shows ? weight(entry.spot) : -weight(entry.spot)
-            if running < cost { cost = running; split = k + 1 }
-        }
-        for (k, entry) in seen.enumerated() where (k < split) == entry.shows {
-            if case .icon(let key) = entry.spot { result.append(key) }
-        }
-
-        // Among the ones that show, the out-of-place icons are those outside
-        // the longest run that is in order. Comparing spot by spot would also
-        // count every icon after a wrong one, and undo spots that did land.
-        let landed = seen[split...].filter(\.shows).map(\.spot)
-        let wanted = order.filter(landed.contains)
-        let n = wanted.count, m = landed.count
-        var best = Array(repeating: Array(repeating: 0, count: m + 1), count: n + 1)
-        for i in stride(from: n - 1, through: 0, by: -1) {
-            for j in stride(from: m - 1, through: 0, by: -1) {
-                best[i][j] = wanted[i] == landed[j]
-                    ? best[i + 1][j + 1] + weight(wanted[i])
-                    : max(best[i + 1][j], best[i][j + 1])
-            }
-        }
-        var inOrder = Set<Spot>()
-        var i = 0, j = 0
-        while i < n, j < m {
-            if wanted[i] == landed[j], best[i][j] == best[i + 1][j + 1] + weight(wanted[i]) {
-                inOrder.insert(wanted[i]); i += 1; j += 1
-            } else if best[i + 1][j] >= best[i][j + 1] {
-                i += 1
-            } else {
-                j += 1
-            }
-        }
-        for spot in wanted where !inOrder.contains(spot) {
-            if case .icon(let key) = spot { result.append(key) }
+            let wrongSide = (k < bestSplit) == entry.shows
+            let outOfOrder = k >= bestSplit && entry.shows && !bestKept.contains(entry.spot)
+            if wrongSide || outOfOrder, case .icon(let key) = entry.spot { result.append(key) }
         }
         return result
     }

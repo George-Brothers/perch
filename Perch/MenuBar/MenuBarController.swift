@@ -101,6 +101,7 @@ final class MenuBarController: NSObject, ObservableObject {
                 // Perch can no longer see the icons or open hidden ones: show
                 // them all, and hide again once the permission is back.
                 waitsForAccessibility = true
+                hasPlaced = false
                 reveal()
             }
         }
@@ -153,6 +154,14 @@ final class MenuBarController: NSObject, ObservableObject {
     func collapse() {
         stopMenuWatch()
         isTemporaryReveal = false
+        // Every caller, not just the bird: without Accessibility, or before the
+        // divider has a real spot, hiding could hide the icons you want.
+        guard hasAccessibility, hasPlaced else {
+            log.notice("not hiding: Perch hasn't placed the divider with Accessibility yet")
+            visibility = .revealed
+            apply()
+            return
+        }
         guard perchIsRightOfDivider() else {
             // The bird ended up on the hidden side, so hiding would hide Perch
             // itself. Put Perch back next to Control Center, once. If macOS

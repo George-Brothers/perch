@@ -189,24 +189,34 @@ enum StatusItemPositions {
 /// spots without restarting any app. It has no windows and macOS starts it
 /// again by itself; Apple's icons blink for a moment.
 enum AppRestarter {
-    @MainActor private static var lastRestart: Date?
+    /// Kept in Perch's settings: Perch relaunches itself after a spacing change,
+    /// and launchd doesn't tell apps when Control Center started.
+    private static let lastRestartKey = "lastControlCenterRestart"
+    @MainActor private static var lastRestart: Date? {
+        get { UserDefaults.standard.object(forKey: lastRestartKey) as? Date }
+        set { UserDefaults.standard.set(newValue, forKey: lastRestartKey) }
+    }
+    private static let log = Logger(subsystem: "com.georgebrothers.perch", category: "positions")
 
     @MainActor static func restartControlCenter() async {
         // launchd waits 10 s before bringing back a process that ran for less
-        // than that, leaving the bar without icons; space restarts out. Its
-        // launch time counts too, in case Perch itself restarted since.
+        // than that, leaving the bar without icons; space restarts out.
         func running() -> NSRunningApplication? {
             NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.controlcenter").first
         }
+        var saidWaiting = false
         while true {
-            let started = [lastRestart, running()?.launchDate].compactMap { $0 }.max()
-            if let started, Date().timeIntervalSince(started) < 10.5 {
+            // A time in the future means the clock changed; don't wait on it.
+            if let started = lastRestart, Date().timeIntervalSince(started) >= 0,
+               Date().timeIntervalSince(started) < 10.5 {
                 try? await Task.sleep(for: .seconds(10.5 - Date().timeIntervalSince(started)))
                 continue
             }
             // That wait can be long; don't close a menu you opened meanwhile,
             // or restart while the screen is locked.
             if MenuBarGeometry.isMenuOpen() || screenIsLocked {
+                if !saidWaiting { log.notice("restart waiting: a menu is open or the screen is locked") }
+                saidWaiting = true
                 try? await Task.sleep(for: .milliseconds(500))
                 continue
             }
