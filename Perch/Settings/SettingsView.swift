@@ -5,6 +5,7 @@ struct SettingsView: View {
     @ObservedObject var preferences: Preferences
     @ObservedObject var permissions: Permissions
     @ObservedObject var engine: LayoutEngine
+    let onShowWelcome: () -> Void
 
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
     @State private var needsApproval = LaunchAtLogin.needsApproval
@@ -78,6 +79,10 @@ struct SettingsView: View {
                 Text("Perch \(version)")
                     .foregroundStyle(.tertiary)
                 Spacer()
+                Button("Welcome Tour", action: onShowWelcome)
+                    .buttonStyle(.link)
+                    .foregroundStyle(.secondary)
+                    .padding(.trailing, 14)
                 Button("Quit") { NSApp.terminate(nil) }
                     .buttonStyle(.link)
                     .foregroundStyle(.secondary)

@@ -1,55 +1,472 @@
+import AppKit
 import SwiftUI
 
-/// Shown once, the first time Perch runs: the three things to know, and
-/// Accessibility if Perch doesn't have it yet. One line each.
-struct WelcomeView: View {
-    @ObservedObject var permissions: Permissions
-    let onDone: () -> Void
-
+/// The welcome window: shown the first time Perch runs, and again from
+/// Settings → Welcome tour. It teaches the whole app, one thing per page,
+/// with a button on most pages to try it right away.
+@MainActor
+final class WelcomeWindowController {
     static let shownKey = "welcomeShown"
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 8) {
-                step("Click empty menu bar", "Hidden icons")
-                step("Right-click it", "Arrange")
-                step("⌘Space, an icon's name", "Open it")
-            }
-            .font(.system(size: 13))
+    private let makeContent: (@escaping () -> Void) -> AnyView
+    private var window: NSWindow?
+    /// Runs when the window closes, however it was closed.
+    var onClose: (() -> Void)?
+    private var closeObserver: NSObjectProtocol?
 
-            HStack {
-                if !permissions.hasAccessibility {
-                    Text("Perch needs Accessibility first.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                    Spacer(minLength: 12)
-                    Button("Allow…") { permissions.requestAccessibility() }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
-                } else {
-                    Spacer()
-                    Button("Done", action: onDone)
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
-                        .keyboardShortcut(.defaultAction)
-                }
+    init(makeContent: @escaping (_ close: @escaping () -> Void) -> AnyView) {
+        self.makeContent = makeContent
+    }
+
+    var isOpen: Bool { window?.isVisible == true }
+
+    func show() {
+        if window == nil {
+            let hosting = NSHostingController(rootView: makeContent { [weak self] in self?.window?.close() })
+            let window = NSWindow(contentViewController: hosting)
+            window.title = "Welcome to Perch"
+            window.styleMask = [.titled, .closable]
+            window.titleVisibility = .hidden
+            window.isReleasedWhenClosed = false
+            window.setContentSize(NSSize(width: WelcomeView.size.width, height: WelcomeView.size.height))
+            window.center()
+            closeObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.willCloseNotification, object: window, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.onClose?() }
             }
+            self.window = window
+        } else if let window, !window.isVisible {
+            // Start from the first page each time.
+            window.contentViewController = NSHostingController(
+                rootView: makeContent { [weak self] in self?.window?.close() }
+            )
+            window.center()
         }
-        .padding(16)
-        .fixedSize()
-        .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5)
-        )
+        NSApp.activate(ignoringOtherApps: true)
+        window?.makeKeyAndOrderFront(nil)
+        window?.orderFrontRegardless()
+    }
+}
+
+struct WelcomeView: View {
+    @ObservedObject var permissions: Permissions
+    @ObservedObject var preferences: Preferences
+    let onShowHiddenIcons: () -> Void
+    let onOpenArrange: () -> Void
+    let onOpenSettings: () -> Void
+    let onDone: () -> Void
+
+    static let size = CGSize(width: 640, height: 530)
+
+    enum Page: Int, CaseIterable {
+        case hello, access, hidden, arrange, spotlight, settings
+    }
+
+    @State private var page: Page = .hello
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ZStack {
+                LinearGradient(colors: [Color.accentColor.opacity(0.18), Color.accentColor.opacity(0.04)],
+                               startPoint: .top, endPoint: .bottom)
+                illustration
+                    .id(page)
+                    .transition(.opacity)
+            }
+            .frame(height: 210)
+
+            VStack(alignment: .leading, spacing: 12) {
+                content
+                    .id(page)
+                    .transition(.opacity)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 36)
+            .padding(.top, 24)
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            footer
+        }
+        .frame(width: Self.size.width, height: Self.size.height)
+        .animation(.easeInOut(duration: 0.2), value: page)
         .onAppear { permissions.refresh() }
     }
 
-    private func step(_ how: String, _ what: String) -> some View {
-        GridRow {
-            Text(how).foregroundStyle(.secondary)
-            Text(what)
+    // MARK: - Pages
+
+    @ViewBuilder
+    private var content: some View {
+        switch page {
+        case .hello:
+            title("Welcome to Perch")
+            para("Perch keeps your menu bar tidy. Icons that don't fit, or that you'd rather not see, wait out of sight, one click away.")
+            para("It works with the menu bar you already have: nothing moves your mouse, and your apps never restart. This short tour shows you everything Perch does.")
+
+        case .access:
+            title("Let Perch see your menu bar")
+            para("Perch needs Accessibility to see where each icon is, move them, and open the hidden ones. It uses it for nothing else, and never controls your mouse or keyboard.")
+            HStack(spacing: 12) {
+                if permissions.hasAccessibility {
+                    Label("Accessibility is on", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                        .font(.system(size: 13, weight: .medium))
+                } else {
+                    Button("Allow Accessibility…") { permissions.requestAccessibility() }
+                        .buttonStyle(.borderedProminent)
+                    Text("Turn Perch on in the list macOS opens, then come back.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.top, 4)
+
+        case .hidden:
+            title("Click empty space to see hidden icons")
+            para("Click any empty part of the menu bar. Perch's bar drops down with every icon that's hidden or doesn't fit. Click one and its menu opens right there, like any menu.")
+            para("Click empty space again, or anywhere else, to put it away.")
+            tryButton("Show Me", action: onShowHiddenIcons)
+
+        case .arrange:
+            title("Right-click empty space to arrange")
+            para("Arrange shows your menu bar as two rows: the icons in the bar, and the ones that are hidden. Drag an icon to any spot, in either row.")
+            para("Order is priority: when the bar runs out of room, icons on the left move to Hidden first. Changes apply when you close Arrange, and Apple's icons blink once while they do.")
+            tryButton("Open Arrange", action: onOpenArrange)
+
+        case .spotlight:
+            title("Find any icon with Spotlight")
+            para("Press ⌘Space and type an icon's name, like Wi-Fi, Battery or an app's name. Pick it and its menu opens, even if it's hidden.")
+            para("Shortcuts can open Perch's bar or Arrange, too.")
+
+        case .settings:
+            title("Settings are a right-click away")
+            para("Right-click Arrange and choose Settings, or press ⌘, while Arrange is open. Opening Perch from Applications opens them too.")
+            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 10) {
+                GridRow {
+                    Text("Open at login").foregroundStyle(.secondary)
+                    LoginToggle()
+                }
+                GridRow {
+                    Text("In the menu bar").foregroundStyle(.secondary)
+                    Picker("", selection: $preferences.barItem) {
+                        ForEach(PerchBarItem.allCases) { Text($0.title).tag($0) }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .fixedSize()
+                }
+            }
+            .font(.system(size: 13))
+            .padding(.top, 2)
+            Text(barItemNote)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+            tryButton("Open Settings", action: onOpenSettings)
         }
+    }
+
+    private var barItemNote: String {
+        switch preferences.barItem {
+        case .none: "Nothing: Perch adds nothing to your menu bar. Click empty space to use it."
+        case .line: "Line: a thin line marks where hidden icons begin. Click it like empty space."
+        case .icon: "Icon: a small bird you can click, if you'd like something to see."
+        }
+    }
+
+    private func title(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 22, weight: .semibold))
+            .padding(.bottom, 2)
+    }
+
+    private func para(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 13))
+            .foregroundStyle(.secondary)
+            .lineSpacing(2)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func tryButton(_ label: String, action: @escaping () -> Void) -> some View {
+        Button(label, action: action)
+            .controlSize(.regular)
+            .padding(.top, 4)
+    }
+
+    // MARK: - Footer
+
+    private var footer: some View {
+        HStack {
+            HStack(spacing: 7) {
+                ForEach(Page.allCases, id: \.self) { each in
+                    Circle()
+                        .fill(each == page ? Color.accentColor : Color.primary.opacity(0.2))
+                        .frame(width: 6, height: 6)
+                        .onTapGesture { page = each }
+                }
+            }
+            Spacer()
+            if page != .hello {
+                Button("Back") { move(-1) }
+            }
+            if page == .settings {
+                Button("Done", action: onDone)
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+            } else {
+                Button(nextTitle) { move(1) }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .controlSize(.large)
+        .padding(.horizontal, 36)
+        .padding(.vertical, 20)
+    }
+
+    private var nextTitle: String {
+        switch page {
+        case .hello: "Get Started"
+        case .access: permissions.hasAccessibility ? "Continue" : "Later"
+        default: "Continue"
+        }
+    }
+
+    private func move(_ step: Int) {
+        if let next = Page(rawValue: page.rawValue + step) { page = next }
+    }
+
+    // MARK: - Pictures
+
+    @ViewBuilder
+    private var illustration: some View {
+        switch page {
+        case .hello:
+            VStack(spacing: 14) {
+                Image(nsImage: NSApp.applicationIconImage)
+                    .resizable()
+                    .frame(width: 96, height: 96)
+                MiniMenuBar(highlightEmpty: false)
+            }
+        case .access:
+            Image(systemName: permissions.hasAccessibility ? "checkmark.shield.fill" : "hand.raised.fill")
+                .font(.system(size: 64, weight: .light))
+                .foregroundStyle(permissions.hasAccessibility ? Color.green : Color.accentColor)
+                .contentTransition(.symbolEffect(.replace))
+        case .hidden:
+            VStack(spacing: 8) {
+                MiniMenuBar(highlightEmpty: true)
+                MiniDrawer()
+                    .padding(.leading, 230)
+            }
+        case .arrange:
+            MiniArrange()
+        case .spotlight:
+            MiniSpotlight()
+        case .settings:
+            MiniSettings(barItem: preferences.barItem)
+        }
+    }
+}
+
+/// Launch at login, as a plain switch.
+private struct LoginToggle: View {
+    @State private var on = LaunchAtLogin.isEnabled || LaunchAtLogin.needsApproval
+
+    var body: some View {
+        Toggle("", isOn: Binding(get: { on }, set: { value in
+            try? LaunchAtLogin.setEnabled(value)
+            on = LaunchAtLogin.isEnabled || LaunchAtLogin.needsApproval
+        }))
+        .labelsHidden()
+        .toggleStyle(.switch)
+        .controlSize(.small)
+    }
+}
+
+// MARK: - Drawings of Perch, for the tour
+
+/// A small menu bar: app menus on the left, icons on the right, and
+/// optionally the empty space in between marked as the place to click.
+private struct MiniMenuBar: View {
+    let highlightEmpty: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "apple.logo").font(.system(size: 11))
+            Text("Finder").font(.system(size: 11, weight: .bold))
+            ForEach(["File", "Edit", "View"], id: \.self) { Text($0).font(.system(size: 11)) }
+            ZStack {
+                if highlightEmpty {
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+                        .background(RoundedRectangle(cornerRadius: 5).fill(Color.accentColor.opacity(0.12)))
+                    Image(systemName: "cursorarrow.click")
+                        .font(.system(size: 15))
+                        .foregroundStyle(Color.accentColor)
+                }
+            }
+            .frame(width: 130, height: 20)
+            ForEach(["wifi", "battery.75percent", "switch.2"], id: \.self) {
+                Image(systemName: $0).font(.system(size: 11))
+            }
+            Text("9:41").font(.system(size: 11))
+        }
+        .padding(.horizontal, 14)
+        .frame(height: 28)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .shadow(color: .black.opacity(0.08), radius: 3, y: 1)
+    }
+}
+
+/// Perch's bar, hanging under the menu bar.
+private struct MiniDrawer: View {
+    var body: some View {
+        HStack(spacing: 14) {
+            ForEach(["cloud", "camera.viewfinder", "waveform", "chart.bar.fill"], id: \.self) {
+                Image(systemName: $0).font(.system(size: 12))
+            }
+        }
+        .padding(.horizontal, 14)
+        .frame(height: 28)
+        .background(.regularMaterial, in: Capsule())
+        .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
+    }
+}
+
+/// Arrange: the bar row and the Hidden row, with an icon being dragged down.
+private struct MiniArrange: View {
+    private let shown = ["chart.bar.fill", "wifi", "battery.75percent"]
+    private let hidden = ["cloud", "camera.viewfinder"]
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 6) {
+            row(shown, fill: 0.10)
+            row(hidden, fill: 0.04, label: "Hidden")
+        }
+        .padding(8)
+        .frame(width: 340)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .shadow(color: .black.opacity(0.12), radius: 5, y: 2)
+        .overlay(alignment: .topLeading) {
+            // An icon on its way from the bar to Hidden.
+            HStack(spacing: 2) {
+                Image(systemName: "waveform")
+                    .font(.system(size: 12))
+                    .frame(width: 26, height: 22)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
+                    .shadow(color: .black.opacity(0.2), radius: 3, y: 1)
+                Image(systemName: "arrow.down.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+            }
+            .offset(x: 150, y: 22)
+        }
+    }
+
+    private func row(_ symbols: [String], fill: Double, label: String? = nil) -> some View {
+        HStack(spacing: 16) {
+            if let label {
+                Text(label).font(.system(size: 10)).foregroundStyle(.tertiary)
+            }
+            Spacer()
+            ForEach(symbols, id: \.self) { Image(systemName: $0).font(.system(size: 12)) }
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 30)
+        .background(Color.primary.opacity(fill), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+/// Spotlight, finding a menu bar icon.
+private struct MiniSpotlight: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                Text("Wi-Fi").font(.system(size: 17))
+                Spacer()
+                Text("⌘Space").font(.system(size: 11)).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 42)
+            Divider()
+            HStack(spacing: 10) {
+                Image(systemName: "wifi")
+                    .frame(width: 26, height: 26)
+                    .background(Color.accentColor.opacity(0.15), in: RoundedRectangle(cornerRadius: 6))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Wi-Fi").font(.system(size: 13, weight: .medium))
+                    Text("Menu bar icon · Perch").font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(10)
+            .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+            .padding(6)
+        }
+        .frame(width: 340)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
+    }
+}
+
+/// Settings, small, with where to find it.
+private struct MiniSettings: View {
+    let barItem: PerchBarItem
+
+    var body: some View {
+        HStack(spacing: 22) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Right-click Arrange")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Settings…").font(.system(size: 12))
+                        .padding(.horizontal, 10).padding(.vertical, 4)
+                        .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 5))
+                        .foregroundStyle(.white)
+                    Text("Quit Perch").font(.system(size: 12)).padding(.horizontal, 10)
+                }
+                .padding(6)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
+            }
+
+            Image(systemName: "arrow.right").foregroundStyle(.secondary)
+
+            VStack(spacing: 0) {
+                settingRow("Open at login") {
+                    Capsule().fill(Color.accentColor).frame(width: 26, height: 15)
+                        .overlay(alignment: .trailing) { Circle().fill(.white).frame(width: 13, height: 13).padding(1) }
+                }
+                Divider()
+                settingRow("In the menu bar") { Text(barItem.title).font(.system(size: 11)).foregroundStyle(.secondary) }
+                Divider()
+                settingRow("Icon spacing") {
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Color.primary.opacity(0.2)).frame(width: 60, height: 3)
+                        Capsule().fill(Color.accentColor).frame(width: 34, height: 3)
+                        Circle().fill(.white).frame(width: 12, height: 12)
+                            .shadow(color: .black.opacity(0.25), radius: 1, y: 0.5)
+                            .offset(x: 28)
+                    }
+                }
+            }
+            .frame(width: 210)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .shadow(color: .black.opacity(0.12), radius: 5, y: 2)
+        }
+    }
+
+    private func settingRow(_ title: String, @ViewBuilder trailing: () -> some View) -> some View {
+        HStack {
+            Text(title).font(.system(size: 11))
+            Spacer()
+            trailing()
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 30)
     }
 }
