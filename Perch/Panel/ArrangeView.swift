@@ -126,6 +126,9 @@ struct ArrangeBar: View {
         let slots = rows[row] ?? []
         let targeted = drag != nil && drag?.slot != .split && targetRow == row && drag?.from != row
         return HStack(spacing: engine.iconGap) {
+            if row == .bar {
+                ForEach(pinned) { item in pinnedView(item) }
+            }
             ForEach(slots, id: \.self) { slot in
                 slotView(slot, in: row)
                     .background(GeometryReader { geometry in
@@ -207,6 +210,17 @@ struct ArrangeBar: View {
                     .contextMenu { contextMenu(for: item, in: row) }
             }
         }
+    }
+
+    /// A Live Activity or the mic and camera dot: macOS puts these at the left
+    /// end of the menu bar itself, so they're shown there and can't be dragged.
+    private func pinnedView(_ item: MenuBarItem) -> some View {
+        BarIcon(item: item, image: images.image(for: item), invert: !images.iconsAreLight,
+                width: item.frame.width, maxHeight: height, waiting: nil, clickable: false,
+                tooltip: item.isLiveActivity
+                    ? "\(item.displayName) Live Activity. macOS always puts these at the left end of the menu bar, so Perch makes room for them. It goes away when the app ends it."
+                    : "\(item.displayName). macOS places this one itself.")
+            .opacity(0.75)
     }
 
     @ViewBuilder
@@ -420,6 +434,13 @@ struct ArrangeBar: View {
         engine.items.filter { $0.isMovable && $0.isInMenuBar }
     }
 
+    /// Showing icons macOS places itself, left of the clock and Control Center.
+    private var pinned: [MenuBarItem] {
+        engine.items
+            .filter { !$0.isMovable && !$0.isFixed && $0.isInMenuBar && $0.section == .shown }
+            .sorted { $0.frame.minX < $1.frame.minX }
+    }
+
     /// Why an icon is drawn faded: it isn't where its side says yet.
     private func waitingNote(for item: MenuBarItem, in row: Row) -> String? {
         if engine.hasQueuedMoves { return nil }
@@ -501,6 +522,7 @@ private struct BarIcon: View {
     /// app hasn't reopened since you moved it).
     let waiting: String?
     let clickable: Bool
+    var tooltip: String?
     @State private var hovering = false
 
     var body: some View {
@@ -528,7 +550,7 @@ private struct BarIcon: View {
         )
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
-        .help(waiting.map { "\(item.displayName): \($0)" } ?? item.displayName)
+        .help(tooltip ?? waiting.map { "\(item.displayName): \($0)" } ?? item.displayName)
         .accessibilityLabel(item.displayName)
     }
 }
