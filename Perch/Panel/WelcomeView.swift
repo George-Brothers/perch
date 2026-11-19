@@ -329,8 +329,8 @@ private struct MiniDrawer: View {
         }
         .padding(.horizontal, 14)
         .frame(height: 28)
-        .background(.regularMaterial, in: Capsule())
-        .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
+        .perchSurface(Capsule(style: .continuous))
+        .shadow(color: .black.opacity(0.2), radius: 4, y: 2)
     }
 }
 
@@ -346,16 +346,16 @@ private struct MiniArrange: View {
         }
         .padding(8)
         .frame(width: 340)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .shadow(color: .black.opacity(0.12), radius: 5, y: 2)
+        .perchSurface(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .shadow(color: .black.opacity(0.2), radius: 5, y: 2)
         .overlay(alignment: .topLeading) {
             // An icon on its way from the bar to Hidden.
             HStack(spacing: 2) {
                 Image(systemName: "waveform")
                     .font(.system(size: 12))
                     .frame(width: 26, height: 22)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
-                    .shadow(color: .black.opacity(0.2), radius: 3, y: 1)
+                    .background(Color(white: 0.24), in: RoundedRectangle(cornerRadius: 6))
+                    .shadow(color: .black.opacity(0.35), radius: 3, y: 1)
                 Image(systemName: "arrow.down.right")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Color.accentColor)
@@ -374,7 +374,7 @@ private struct MiniArrange: View {
         }
         .padding(.horizontal, 12)
         .frame(height: 30)
-        .background(Color.primary.opacity(fill), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(Color.white.opacity(fill), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 
@@ -430,8 +430,8 @@ private struct MiniSettings: View {
                     Text("Quit Perch").font(.system(size: 12)).padding(.horizontal, 10)
                 }
                 .padding(6)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
+                .perchSurface(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .shadow(color: .black.opacity(0.2), radius: 4, y: 2)
             }
 
             Image(systemName: "arrow.right").foregroundStyle(.secondary)

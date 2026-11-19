@@ -41,6 +41,7 @@
 35. `perch-minimal-settings`: Settings is one short page (open at login, what's in the menu bar, exact pictures, icon spacing, version and Quit). The Icons tab (a copy of Arrange) and the About tab are gone, and so is the Settings hold on moves.
 36. `perch-minimal-arrange`: Arrange is just its rows: no title, no ⋯ button, no label column. Hidden and Turned off name themselves faintly inside the row when there's room; the bar row shows a spinner there while icons move. The whole panel takes the menu bar's look when it has icon pictures, like Perch's bar. Settings and Quit are a right-click on the panel, or ⌘,.
 37. `perch-minimal-welcome`: a six-page welcome tour in its own window on first launch: what Perch is, Accessibility (live), click to see hidden icons, right-click to arrange, Spotlight, and where Settings are (with Open at login and the bar item right there). Each page has a try-it button. Settings has a Welcome Tour link to reopen it.
+38. `perch-dark-bar`: Perch's bar is a dark pill and Arrange uses the same dark glass (`perchSurface`), so both stand out over any window. Icon pictures taken on a light menu bar are inverted with their hue kept (`LightOnDark`). `MatchIconColors` is gone.
 
 ## macOS 26 facts
 - Reading or writing another app's sandbox container (~/Library/Containers/<id>) triggers the "access data from other apps" prompt (kTCCServiceSystemPolicyAppData) and the call blocks until it's answered. Perch tells sandboxed apps by their code signature, never by touching the container.

@@ -10,7 +10,7 @@ A light menu bar manager for macOS. Perch hides the menu bar icons you don't nee
 
 ## What it does
 
-- **Click empty menu bar space for Perch's bar.** Every icon that's hidden or doesn't fit drops down in a small bar under the menu bar. Click one and its menu opens right there, like any menu, with Perch's bar still showing. Nothing moves in the menu bar (if an app's menu can't be copied, Perch shows its icons for a moment instead). Perch adds nothing to your bar unless you want it to: a thin line or an icon are options in Settings.
+- **Click empty menu bar space for Perch's bar.** Every icon that's hidden or doesn't fit drops down in a small dark bar under the menu bar, easy to see over any window. Click one and its menu opens right there, like any menu, with Perch's bar still showing. Nothing moves in the menu bar (if an app's menu can't be copied, Perch shows its icons for a moment instead). Perch adds nothing to your bar unless you want it to: a thin line or an icon are options in Settings.
 - **Put every icon where you want it.** Arrange mirrors your menu bar: the bar in order, then Hidden, then icons turned off in System Settings. Drag an icon anywhere and Perch moves the real one there. Order is priority: when the bar is full, icons on the left wait in Hidden until there's room.
 - **Fits your screen.** On a laptop, icons that would land behind the notch go to Perch's bar instead, in your order.
 - **Exact pictures (optional).** Perch's bar shows app icons, or with Screen Recording (in Settings), the icons exactly as they look.
