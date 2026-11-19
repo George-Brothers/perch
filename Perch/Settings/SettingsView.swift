@@ -83,7 +83,7 @@ struct SettingsView: View {
                 Text("Perch \(version)")
                     .foregroundStyle(.tertiary)
                 Spacer()
-                Button("Welcome Tour", action: onShowWelcome)
+                Button("Guide", action: onShowWelcome)
                     .buttonStyle(.link)
                     .foregroundStyle(.secondary)
                     .padding(.trailing, 14)
