@@ -28,7 +28,7 @@ Perch uses about 15 MB of memory and no CPU while idle. It reacts to events and 
 - **Spotlight**: "Arrange Menu Bar" opens Arrange too.
 - **⌘Space**, then an icon's name: open that icon's menu.
 
-On first launch, the Guide walks through all of this. It lists every topic, so you can jump to the one you need; open it again from Settings → Guide.
+On first launch, a short setup walks you through Accessibility and a few choices. Everything else is in the Guide (Settings → Guide), where you can jump to any topic.
 
 ## Build
 

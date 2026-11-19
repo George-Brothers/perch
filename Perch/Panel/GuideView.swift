@@ -1,55 +1,10 @@
 import AppKit
 import SwiftUI
 
-/// The Guide: shown the first time Perch runs, and again from Settings → Guide.
-/// Topics are listed on the left; pick any one to learn it, with a button on
-/// most to try it right away. Next steps through them in order, for a first run.
-@MainActor
-final class WelcomeWindowController {
-    static let shownKey = "welcomeShown"
-
-    private let makeContent: (@escaping () -> Void) -> AnyView
-    private var window: NSWindow?
-    /// Runs when the window closes, however it was closed.
-    var onClose: (() -> Void)?
-    private var closeObserver: NSObjectProtocol?
-
-    init(makeContent: @escaping (_ close: @escaping () -> Void) -> AnyView) {
-        self.makeContent = makeContent
-    }
-
-    var isOpen: Bool { window?.isVisible == true }
-
-    func show() {
-        if window == nil {
-            let hosting = NSHostingController(rootView: makeContent { [weak self] in self?.window?.close() })
-            let window = NSWindow(contentViewController: hosting)
-            window.title = "Perch Guide"
-            window.styleMask = [.titled, .closable]
-            window.titleVisibility = .hidden
-            window.isReleasedWhenClosed = false
-            window.setContentSize(NSSize(width: WelcomeView.size.width, height: WelcomeView.size.height))
-            window.center()
-            closeObserver = NotificationCenter.default.addObserver(
-                forName: NSWindow.willCloseNotification, object: window, queue: .main
-            ) { [weak self] _ in
-                MainActor.assumeIsolated { self?.onClose?() }
-            }
-            self.window = window
-        } else if let window, !window.isVisible {
-            // Start from Welcome each time.
-            window.contentViewController = NSHostingController(
-                rootView: makeContent { [weak self] in self?.window?.close() }
-            )
-            window.center()
-        }
-        NSApp.activate(ignoringOtherApps: true)
-        window?.makeKeyAndOrderFront(nil)
-        window?.orderFrontRegardless()
-    }
-}
-
-struct WelcomeView: View {
+/// The Guide, from Settings → Guide (and the end of setup). Topics are listed
+/// on the left; pick any one to learn it, with a button on most to try it
+/// right away. Next steps through them in order.
+struct GuideView: View {
     @ObservedObject var permissions: Permissions
     @ObservedObject var preferences: Preferences
     let onShowHiddenIcons: () -> Void
@@ -63,11 +18,11 @@ struct WelcomeView: View {
     static let size = CGSize(width: sidebarWidth + 1 + pageWidth, height: 530)
 
     enum Page: Int, CaseIterable {
-        case hello, access, hidden, arrange, spotlight, settings
+        case about, access, hidden, arrange, spotlight, settings
 
         var title: String {
             switch self {
-            case .hello: "Welcome"
+            case .about: "About Perch"
             case .access: "Accessibility"
             case .hidden: "Hidden Icons"
             case .arrange: "Arrange"
@@ -78,7 +33,7 @@ struct WelcomeView: View {
 
         var symbol: String {
             switch self {
-            case .hello: "hand.wave"
+            case .about: "info.circle"
             case .access: "lock.shield"
             case .hidden: "eye.slash"
             case .arrange: "arrow.left.and.right"
@@ -88,7 +43,7 @@ struct WelcomeView: View {
         }
     }
 
-    @State private var page: Page = .hello
+    @State private var page: Page = .about
 
     var body: some View {
         HStack(spacing: 0) {
@@ -173,10 +128,17 @@ struct WelcomeView: View {
     @ViewBuilder
     private var content: some View {
         switch page {
-        case .hello:
-            title("Welcome to Perch")
-            para("Perch keeps your menu bar organized. Icons that don't fit, or that you choose to hide, stay out of view and remain one click away.")
-            para("Perch works with the menu bar macOS already provides. It never moves your pointer, and your apps never restart. Pick any topic on the left to see how it works, or choose Get Started to go through them in order.")
+        case .about:
+            title("About Perch")
+            para("Perch is a lightweight menu bar manager. It hides the icons you don't need and keeps every one of them a click away, in a small bar under the menu bar.")
+            para("macOS has no way to hide another app's icon, so Perch adds a divider and widens it to push hidden icons off the screen. To reorder icons, it saves their new positions and lets macOS place them. It never moves your pointer, and your apps never restart.")
+            HStack(spacing: 14) {
+                Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")")
+                    .foregroundStyle(.tertiary)
+                Link("Perch on GitHub", destination: URL(string: "https://github.com/George-Brothers/perch")!)
+            }
+            .font(.system(size: 12))
+            .padding(.top, 2)
 
         case .access:
             title("Allow Accessibility access")
@@ -290,12 +252,7 @@ struct WelcomeView: View {
     }
 
     private var nextTitle: String {
-        let next = Page(rawValue: page.rawValue + 1)?.title ?? ""
-        switch page {
-        case .hello: return "Get Started"
-        case .access where !permissions.hasAccessibility: return "Later"
-        default: return "Next: \(next)"
-        }
+        "Next: \(Page(rawValue: page.rawValue + 1)?.title ?? "")"
     }
 
     private func move(_ step: Int) {
@@ -307,7 +264,7 @@ struct WelcomeView: View {
     @ViewBuilder
     private var illustration: some View {
         switch page {
-        case .hello:
+        case .about:
             VStack(spacing: 14) {
                 Image(nsImage: NSApp.applicationIconImage)
                     .resizable()
@@ -336,7 +293,7 @@ struct WelcomeView: View {
 }
 
 /// Launch at login, as a plain switch.
-private struct LoginToggle: View {
+struct LoginToggle: View {
     @State private var on = LaunchAtLogin.isEnabled || LaunchAtLogin.needsApproval
 
     var body: some View {
@@ -350,12 +307,15 @@ private struct LoginToggle: View {
     }
 }
 
-// MARK: - Drawings of Perch, for the tour
+// MARK: - Drawings of Perch, for the Guide and setup
 
 /// A small menu bar: app menus on the left, icons on the right, and
 /// optionally the empty space in between marked as the place to click.
-private struct MiniMenuBar: View {
+struct MiniMenuBar: View {
     let highlightEmpty: Bool
+    /// What Perch shows in it, if anything.
+    var mark: PerchBarItem = .none
+    var iconStyle: PerchIconStyle = .bird
 
     var body: some View {
         HStack(spacing: 12) {
@@ -373,6 +333,11 @@ private struct MiniMenuBar: View {
                 }
             }
             .frame(width: 130, height: 20)
+            switch mark {
+            case .none: EmptyView()
+            case .line: Capsule().fill(.secondary).frame(width: 2, height: 13)
+            case .icon: Image(systemName: iconStyle.symbolName(revealed: false)).font(.system(size: 11, weight: .semibold))
+            }
             ForEach(["wifi", "battery.75percent", "switch.2"], id: \.self) {
                 Image(systemName: $0).font(.system(size: 11))
             }
@@ -386,7 +351,7 @@ private struct MiniMenuBar: View {
 }
 
 /// Perch's bar, hanging under the menu bar.
-private struct MiniDrawer: View {
+struct MiniDrawer: View {
     var body: some View {
         HStack(spacing: 14) {
             ForEach(["cloud", "camera.viewfinder", "waveform", "chart.bar.fill"], id: \.self) {

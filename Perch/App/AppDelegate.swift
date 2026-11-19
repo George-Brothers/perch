@@ -11,7 +11,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settings: SettingsWindowController!
     private var arrangePanel: PanelController!
     private var drawer: DrawerController!
-    private var welcome: WelcomeWindowController!
+    private var guide: HostedWindow!
+    private var setup: HostedWindow!
     private let images = IconImages()
     private var spotlight: SpotlightIndex!
     private var cancellables = Set<AnyCancellable>()
@@ -41,7 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         settings = SettingsWindowController { [weak self] in
             AnyView(SettingsView(preferences: preferences, permissions: permissions, engine: engine,
-                                 onShowWelcome: { self?.showWelcome() }))
+                                 onShowGuide: { self?.showGuide() }))
         }
 
         arrangePanel = PanelController(model: engine) { [weak self] in
@@ -158,11 +159,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.arrangePanel.toggle(anchor: menuBar.anchor)
         }
 
-        // First launch: the Guide, which also asks for Accessibility.
-        // It counts as seen once it closes with Accessibility allowed, so
-        // someone who goes off to allow it sees it again when they come back.
-        welcome = WelcomeWindowController { [weak self] close in
-            AnyView(WelcomeView(
+        // The Guide: every topic, from Settings → Guide or the end of setup.
+        guide = HostedWindow(title: "Perch Guide", size: GuideView.size) { [weak self] close in
+            AnyView(GuideView(
                 permissions: permissions,
                 preferences: preferences,
                 onShowHiddenIcons: { self?.showHiddenIcons() },
@@ -171,20 +170,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 onDone: close
             ))
         }
-        welcome.onClose = {
-            if permissions.hasAccessibility { UserDefaults.standard.set(true, forKey: WelcomeWindowController.shownKey) }
+
+        // First launch: setup, which also asks for Accessibility. It counts
+        // as done once it closes with Accessibility allowed, so someone who
+        // goes off to allow it sees it again when they come back.
+        setup = HostedWindow(title: "Perch Setup", size: SetupView.size) { [weak self] close in
+            AnyView(SetupView(
+                permissions: permissions,
+                preferences: preferences,
+                onOpenGuide: { self?.showGuide() },
+                onDone: close
+            ))
         }
-        if !UserDefaults.standard.bool(forKey: WelcomeWindowController.shownKey) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.showWelcome() }
+        setup.onClose = {
+            if permissions.hasAccessibility { UserDefaults.standard.set(true, forKey: Self.setupDoneKey) }
+        }
+        if !UserDefaults.standard.bool(forKey: Self.setupDoneKey) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.showSetup() }
         }
         permissions.$hasAccessibility
             .removeDuplicates()
             .dropFirst()
             .filter { $0 }
             .sink { [weak self] _ in
-                // Back from System Settings with Accessibility on: bring the tour forward.
-                guard !UserDefaults.standard.bool(forKey: WelcomeWindowController.shownKey) else { return }
-                self?.showWelcome()
+                // Back from System Settings with Accessibility on: bring setup forward.
+                guard !UserDefaults.standard.bool(forKey: Self.setupDoneKey) else { return }
+                self?.showSetup()
             }
             .store(in: &cancellables)
     }
@@ -197,9 +208,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if kept != .arrange { arrangePanel.close() }
     }
 
-    func showWelcome() {
+    /// Set once setup closes with Accessibility allowed. (The key is from
+    /// when setup was the welcome tour, so nobody sees it twice.)
+    private static let setupDoneKey = "welcomeShown"
+
+    func showGuide() {
         closePanels(except: nil)
-        welcome.show()
+        guide.show()
+    }
+
+    func showSetup() {
+        closePanels(except: nil)
+        setup.show()
     }
 
     // MARK: - Actions for Spotlight and Shortcuts

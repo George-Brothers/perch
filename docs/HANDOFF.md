@@ -45,6 +45,7 @@
 39. `perch-settings-gear`: a gear at the left end of Arrange opens Settings (right-click and ⌘, still work). The tour's Settings page points to it.
 40. `perch-long-bar`: Arrange is one strip (Hidden dimmed, a line, then the bar), and the line drags too (`commitSplit`: one `place` per icon it passed). Settings → Arrange picks Below the menu bar or Over the menu bar (`ArrangeStyle`; over uses `PanelController.topLeft` and `OverBarGeometry`, falls back to below beside a notch when the strip doesn't fit). The Turned off row is gone.
 41. `perch-guide`: the welcome tour is now the Guide: a topic list on the left (Accessibility shows a green or orange dot), pick any topic; Next steps through in order. Settings → Guide.
+43. `perch-setup`: first launch plays setup (`SetupView`, its own window): Welcome with an intro animation, Accessibility, choices, Ready. The Guide's first topic is About Perch (version, GitHub) instead of Welcome; its footer is plain Next. Both windows use `HostedWindow`. Setup still counts as done under the old `welcomeShown` key.
 42. `perch-live-activities`: Perch re-fits the bar when an icon right of the divider appears, goes or changes width (`MenuBarController.onBarChange`, from `NSWindow.didMoveNotification` on the divider's window, right edge only, ignored for 2 s after Perch moves its own items). Arrange shows Live Activities and the mic and camera dot pinned at the left of the bar side (not draggable, a tooltip explains).
 
 ## macOS 26 facts
