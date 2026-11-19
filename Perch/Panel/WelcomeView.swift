@@ -100,21 +100,21 @@ struct WelcomeView: View {
         switch page {
         case .hello:
             title("Welcome to Perch")
-            para("Perch keeps your menu bar tidy. Icons that don't fit, or that you'd rather not see, wait out of sight, one click away.")
-            para("It works with the menu bar you already have: nothing moves your mouse, and your apps never restart. This short tour shows you everything Perch does.")
+            para("Perch keeps your menu bar organized. Icons that don't fit, or that you choose to hide, stay out of view and remain one click away.")
+            para("Perch works with the menu bar macOS already provides. It never moves your pointer, and your apps never restart. This tour walks through each feature.")
 
         case .access:
-            title("Let Perch see your menu bar")
-            para("Perch needs Accessibility to see where each icon is, move them, and open the hidden ones. It uses it for nothing else, and never controls your mouse or keyboard.")
+            title("Allow Accessibility access")
+            para("Perch uses Accessibility to locate menu bar icons, reposition them, and open hidden ones. It uses this access for nothing else and never controls your pointer or keyboard.")
             HStack(spacing: 12) {
                 if permissions.hasAccessibility {
-                    Label("Accessibility is on", systemImage: "checkmark.circle.fill")
+                    Label("Accessibility access granted", systemImage: "checkmark.circle.fill")
                         .foregroundStyle(.green)
                         .font(.system(size: 13, weight: .medium))
                 } else {
                     Button("Allow Accessibility…") { permissions.requestAccessibility() }
                         .buttonStyle(.borderedProminent)
-                    Text("Turn Perch on in the list macOS opens, then come back.")
+                    Text("Turn on Perch in the list that opens, then return here.")
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                 }
@@ -122,25 +122,25 @@ struct WelcomeView: View {
             .padding(.top, 4)
 
         case .hidden:
-            title("Click empty space to see hidden icons")
-            para("Click any empty part of the menu bar. Perch's bar drops down with every icon that's hidden or doesn't fit. Click one and its menu opens right there, like any menu.")
-            para("Click empty space again, or anywhere else, to put it away.")
-            tryButton("Show Me", action: onShowHiddenIcons)
+            title("View hidden icons")
+            para("Click any empty area of the menu bar to show Perch's bar, which holds every icon that is hidden or doesn't fit. Click an icon to open its menu in place.")
+            para("Click the empty area again, or anywhere else, to close it.")
+            tryButton("Show Hidden Icons", action: onShowHiddenIcons)
 
         case .arrange:
-            title("Right-click empty space to arrange")
-            para("Arrange shows your menu bar as two rows: the icons in the bar, and the ones that are hidden. Drag an icon to any spot, in either row.")
-            para("Order is priority: when the bar runs out of room, icons on the left move to Hidden first. Changes apply when you close Arrange, and Apple's icons blink once while they do.")
+            title("Arrange your menu bar")
+            para("Right-click any empty area of the menu bar to open Arrange. It shows two rows, the icons in your menu bar and the icons that are hidden. Drag an icon to any position in either row.")
+            para("Order sets priority. When the menu bar runs out of space, icons on the left move to Hidden first. Changes take effect when you close Arrange, and Apple's icons briefly redraw.")
             tryButton("Open Arrange", action: onOpenArrange)
 
         case .spotlight:
-            title("Find any icon with Spotlight")
-            para("Press ⌘Space and type an icon's name, like Wi-Fi, Battery or an app's name. Pick it and its menu opens, even if it's hidden.")
-            para("Shortcuts can open Perch's bar or Arrange, too.")
+            title("Search with Spotlight")
+            para("Press ⌘Space and type the name of any menu bar icon, such as Wi-Fi, Battery or an app. Choose the result to open its menu, even if the icon is hidden.")
+            para("Perch also adds Shortcuts actions for showing hidden icons and opening Arrange.")
 
         case .settings:
-            title("Settings are a right-click away")
-            para("Right-click Arrange and choose Settings, or press ⌘, while Arrange is open. Opening Perch from Applications opens them too.")
+            title("Settings")
+            para("To open Settings, right-click Arrange and choose Settings, or press ⌘, while Arrange is open. Opening Perch from the Applications folder also opens Settings.")
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 10) {
                 GridRow {
                     Text("Open at login").foregroundStyle(.secondary)
@@ -167,9 +167,9 @@ struct WelcomeView: View {
 
     private var barItemNote: String {
         switch preferences.barItem {
-        case .none: "Nothing: Perch adds nothing to your menu bar. Click empty space to use it."
-        case .line: "Line: a thin line marks where hidden icons begin. Click it like empty space."
-        case .icon: "Icon: a small bird you can click, if you'd like something to see."
+        case .none: "Nothing: Perch adds no item to the menu bar. Click any empty area to use it."
+        case .line: "Line: a thin line marks where hidden icons begin. Clicking it works like clicking empty space."
+        case .icon: "Icon: a small Perch icon in the menu bar that you can click."
         }
     }
 
