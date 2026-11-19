@@ -47,6 +47,10 @@ struct SettingsView: View {
                         }
                     }
                 }
+                Picker("Arrange", selection: $preferences.arrangeStyle) {
+                    ForEach(ArrangeStyle.allCases) { Text($0.title).tag($0) }
+                }
+                .help("Where Arrange opens when you right-click the menu bar.")
             }
 
             Section {

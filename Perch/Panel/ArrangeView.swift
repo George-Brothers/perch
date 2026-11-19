@@ -3,31 +3,33 @@ import os
 
 private let arrangeLog = Logger(subsystem: "com.georgebrothers.perch", category: "arrange")
 
-/// Arrange: your menu bar in rows that mirror it, left to right.
+/// Arrange: your menu bar as one strip, left to right, the way macOS lays it out.
 ///
-/// - **Menu bar**: the icons in the bar, in their real order. Order is priority:
-///   when the bar runs out of room, the leftmost wait in Hidden until there's room.
-/// - **Hidden**: icons that show only when you show hidden icons.
-/// - **Turned off**: icons turned off in System Settings → Menu Bar.
+/// Hidden icons sit dimmed left of a line; the icons in the menu bar sit right
+/// of it, in their real order. Order is priority: when the bar runs out of
+/// room, the leftmost wait in Hidden until there's room.
 ///
-/// Drag an icon to any spot in the bar or Hidden and Perch moves the real one there.
-/// Used in the Arrange panel.
+/// Drag an icon to any spot and Perch moves the real one there. Drag the line
+/// to hide or show the icons next to it.
 struct ArrangeBar: View {
     @ObservedObject var engine: LayoutEngine
     @ObservedObject var preferences: Preferences
     @ObservedObject var permissions: Permissions
     @ObservedObject var images: IconImages
     var onOpenItem: ((MenuBarItem) -> Void)?
-    var maxWidth: CGFloat = 640
+    /// The strip's height: Arrange over the menu bar matches the bar's.
+    var height: CGFloat = 32
+    /// Arrange below the menu bar shows notes under the strip; over the bar,
+    /// its toolbar shows them instead.
+    var showsNotes = true
 
     enum Row: Int, CaseIterable {
-        case bar, hidden, off
+        case hidden, bar
 
         var title: String {
             switch self {
             case .bar: "Menu bar"
             case .hidden: "Hidden"
-            case .off: "Turned off"
             }
         }
     }
@@ -35,6 +37,8 @@ struct ArrangeBar: View {
     enum Slot: Hashable {
         case icon(String)
         case perch
+        /// The line between Hidden and the menu bar.
+        case split
     }
 
     private struct DragState {
@@ -54,10 +58,9 @@ struct ArrangeBar: View {
     @GestureState private var dragging = false
     @State private var frames: [Slot: CGRect] = [:]
     @State private var rowFrames: [Row: CGRect] = [:]
-    @State private var contentWidth: CGFloat = 0
+    @State private var stripWidth: CGFloat = 0
     /// The rows as you dropped them, shown until Perch has moved the real icon.
     @State private var pending: [Row: [Slot]]?
-    @State private var offHint: String?
     /// This press started on nothing; logged once.
     @State private var ignoredDrag = false
 
@@ -66,56 +69,17 @@ struct ArrangeBar: View {
             PermissionCard(permissions: permissions)
         } else if !engine.hasScanned {
             HStack { Spacer(); ProgressView().controlSize(.small); Spacer() }
-                .frame(height: 60)
+                .frame(width: 200, height: height)
         } else {
-            VStack(alignment: .leading, spacing: 8) {
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(Row.allCases, id: \.self) { row in
-                        if row != .off || !(rows[.off] ?? []).isEmpty {
-                            rowView(row)
-                        }
-                    }
-                }
-                .coordinateSpace(name: "arrange")
-                // On the rows, not on each icon: an icon dragged into another
-                // row is a new view, and a gesture on the old one never ends.
-                .simultaneousGesture(dragGesture)
-                .onChange(of: dragging) { _, down in
-                    guard !down else { return }
-                    ignoredDrag = false
-                    // After onEnded has had its chance to drop the icon.
-                    DispatchQueue.main.async { drag = nil }
-                }
-                .overlay(alignment: .topLeading) { floatingIcon }
-                // Always current: a drag snapshots these when it starts. (Skipping
-                // updates mid-drag left them stale, since the layout after a drop
-                // is the one already previewed and doesn't change again.)
-                .onPreferenceChange(SlotFrames.self) { frames = $0 }
-                .onPreferenceChange(RowFrames.self) { rowFrames = $0 }
-                .onPreferenceChange(ContentWidth.self) { contentWidth = $0 }
-                .animation(.snappy(duration: 0.18), value: rows)
-
-                if engine.waitsForClose {
-                    Text("The menu bar updates when you close this.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .frame(width: rowWidth, alignment: .leading)
-                }
-
-                if let notice = engine.notice {
-                    Text(notice)
+            VStack(alignment: .leading, spacing: 6) {
+                strip
+                if showsNotes, let note = ArrangeNotes.text(engine) {
+                    Text(note)
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                        .frame(width: rowWidth, alignment: .leading)
-                }
-
-                if let offHint {
-                    Text(offHint)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(width: rowWidth, alignment: .leading)
+                        .frame(width: max(stripWidth - 12, 220), alignment: .leading)
+                        .padding(.horizontal, 6)
                 }
             }
             // Keep showing your drop until every move is done and the bar has settled.
@@ -126,89 +90,101 @@ struct ArrangeBar: View {
         }
     }
 
-    // MARK: - Rows
+    // MARK: - Strip
 
-    /// Every row is as wide as the room on this screen, so the bar row ends
-    /// where the screen does. Icons are drawn at their real size.
-    private var rowWidth: CGFloat {
-        let room = engine.room.map { $0 + 8 } ?? 0
-        return min(max(contentWidth + 12, room, 260), maxWidth)
-    }
-
-    private func rowView(_ row: Row) -> some View {
+    private var strip: some View {
         HStack(spacing: 0) {
-            HStack(spacing: row == .off ? 6 : engine.iconGap) {
-                let slots = rows[row] ?? []
-                ForEach(slots, id: \.self) { slot in
-                    slotView(slot, in: row)
-                        .background(GeometryReader { geometry in
-                            Color.clear.preference(key: SlotFrames.self, value: [slot: geometry.frame(in: .named("arrange"))])
-                        })
-                }
+            if engine.isArranging {
+                ProgressView().controlSize(.mini).padding(.leading, 6)
             }
-            .padding(.horizontal, 4)
-            .background(GeometryReader { geometry in
-                Color.clear.preference(key: ContentWidth.self, value: geometry.size.width)
-            })
-            .frame(width: rowWidth, height: 32, alignment: .trailing)
-            .clipped()
-            .background(rowBackground(row))
-            .overlay(alignment: .leading) { rowLabel(row) }
-            .overlay(alignment: .trailing) { if row == .bar { laptopEdge } }
-            .help(row.title)
-            .background(GeometryReader { geometry in
-                Color.clear.preference(key: RowFrames.self, value: [row: geometry.frame(in: .named("arrange"))])
-            })
+            zone(.hidden)
+            splitLine
+            zone(.bar)
         }
+        .coordinateSpace(name: "arrange")
+        // On the strip, not on each icon: an icon dragged into the other side
+        // is a new view, and a gesture on the old one never ends.
+        .simultaneousGesture(dragGesture)
+        .onChange(of: dragging) { _, down in
+            guard !down else { return }
+            ignoredDrag = false
+            // After onEnded has had its chance to drop the icon.
+            DispatchQueue.main.async { drag = nil }
+        }
+        .overlay(alignment: .topLeading) { floatingIcon }
+        // Always current: a drag snapshots these when it starts.
+        .onPreferenceChange(SlotFrames.self) { frames = $0 }
+        .onPreferenceChange(RowFrames.self) { rowFrames = $0 }
+        .background(GeometryReader { geometry in
+            Color.clear.preference(key: ArrangeStripWidth.self, value: geometry.size.width)
+        })
+        .onPreferenceChange(ArrangeStripWidth.self) { stripWidth = $0 }
+        .animation(.snappy(duration: 0.18), value: rows)
     }
 
-    /// A faint name inside the row, left of its icons, if they leave room.
-    /// The bar row shows a spinner there while Perch moves icons instead.
-    @ViewBuilder
-    private func rowLabel(_ row: Row) -> some View {
-        if row == .bar {
-            if engine.isArranging {
-                ProgressView().controlSize(.mini).padding(.leading, 10)
+    private func zone(_ row: Row) -> some View {
+        let slots = rows[row] ?? []
+        let targeted = drag != nil && drag?.slot != .split && targetRow == row && drag?.from != row
+        return HStack(spacing: engine.iconGap) {
+            ForEach(slots, id: \.self) { slot in
+                slotView(slot, in: row)
+                    .background(GeometryReader { geometry in
+                        Color.clear.preference(key: SlotFrames.self, value: [slot: geometry.frame(in: .named("arrange"))])
+                    })
             }
-        } else if drag == nil {
-            let used = (rows[row] ?? []).reduce(CGFloat(0)) { total, slot in
-                guard case .icon(let key) = slot, let item = item(key) else { return total + 22 }
-                return total + (row == .off ? 28 : item.frame.width + engine.iconGap)
-            }
-            if used + 90 < rowWidth {
-                Text(row.title)
+        }
+        .padding(.horizontal, 6)
+        .frame(minWidth: row == .hidden ? 64 : 40, minHeight: height, maxHeight: height, alignment: .trailing)
+        .overlay {
+            // An empty Hidden still shows where to drop.
+            if row == .hidden && slots.isEmpty {
+                Text("Hidden")
                     .font(.system(size: 11))
                     .foregroundStyle(.tertiary)
-                    .padding(.leading, 10)
                     .allowsHitTesting(false)
             }
         }
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.white.opacity(targeted ? 0.08 : 0))
+        )
+        .overlay(alignment: .trailing) { if row == .bar { laptopEdge } }
+        .background(GeometryReader { geometry in
+            Color.clear.preference(key: RowFrames.self, value: [row: geometry.frame(in: .named("arrange"))])
+        })
+    }
+
+    private var splitLine: some View {
+        let active = drag?.slot == .split
+        return Capsule()
+            .fill(Color.white.opacity(active ? 0.95 : 0.5))
+            .frame(width: active ? 3 : 2, height: min(20, height - 8))
+            .frame(width: 14, height: height)
+            .contentShape(Rectangle())
+            .onHover { inside in
+                if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+            }
+            .background(GeometryReader { geometry in
+                Color.clear.preference(key: SlotFrames.self, value: [.split: geometry.frame(in: .named("arrange"))])
+            })
+            .help("Icons left of the line are hidden. Drag it to hide or show the icons next to it.")
+            .accessibilityLabel("Hidden icons end here")
     }
 
     /// On another display: where a MacBook's screen would cut the bar off.
     @ViewBuilder
     private var laptopEdge: some View {
-        if let laptop = engine.laptopRoom, laptop > 0, laptop + 8 < rowWidth {
+        if let laptop = engine.laptopRoom, laptop > 0, laptop + 8 < (rowFrames[.bar]?.width ?? 0) {
             Image(systemName: "laptopcomputer")
-                .font(.system(size: 9))
+                .font(.system(size: 8))
                 .foregroundStyle(.secondary)
-                .frame(width: 18, height: 30, alignment: .top)
+                .frame(width: 18, height: height, alignment: .top)
                 .overlay(alignment: .bottom) {
-                    Capsule().fill(Color.secondary.opacity(0.6)).frame(width: 1.5, height: 16)
+                    Capsule().fill(Color.secondary.opacity(0.6)).frame(width: 1.5, height: max(height - 16, 8))
                 }
-                .padding(.trailing, laptop + 4 - 9)
+                .padding(.trailing, laptop + 6 - 9)
                 .allowsHitTesting(false)
                 .help("A MacBook's screen ends here")
-        }
-    }
-
-    @ViewBuilder
-    private func rowBackground(_ row: Row) -> some View {
-        let targeted = drag != nil && targetRow == row && row != .off
-        let shape = RoundedRectangle(cornerRadius: 8, style: .continuous)
-        ZStack {
-            shape.fill(Color.white.opacity(row == .bar ? 0.08 : 0.04))
-            if targeted { shape.strokeBorder(Color.accentColor.opacity(0.7), lineWidth: 1.5) }
         }
     }
 
@@ -218,16 +194,16 @@ struct ArrangeBar: View {
         case .perch:
             PerchMark(preferences: preferences, width: engine.perchWidth)
                 .opacity(drag?.slot == .perch ? 0 : 1)
+        case .split:
+            EmptyView()
         case .icon(let key):
             if let item = item(key) {
                 BarIcon(item: item, image: images.image(for: item), invert: !images.iconsAreLight,
-                        width: row == .off ? nil : item.frame.width,
+                        width: item.frame.width, maxHeight: height,
                         waiting: engine.isArranging ? nil : waitingNote(for: item, in: row),
-                        clickable: onOpenItem != nil && row != .off && !engine.isArranging)
-                    .opacity(drag?.slot == slot ? 0 : (row == .off ? 0.5 : 1))
-                    .onTapGesture {
-                        if row == .off { explainOff(item) } else if !engine.isArranging { onOpenItem?(item) }
-                    }
+                        clickable: onOpenItem != nil && !engine.isArranging)
+                    .opacity(drag?.slot == slot ? 0 : (row == .hidden ? 0.5 : 1))
+                    .onTapGesture { if !engine.isArranging { onOpenItem?(item) } }
                     .contextMenu { contextMenu(for: item, in: row) }
             }
         }
@@ -240,14 +216,13 @@ struct ArrangeBar: View {
         switch row {
         case .bar: Button("Hide") { engine.place(item, .before(.divider, shown: false)) }
         case .hidden: Button("Show in Menu Bar") { engine.place(item, .before(.divider, shown: true)) }
-        case .off: Button("Turn On in System Settings…") { explainOff(item) }
         }
     }
 
     /// The icon you're dragging, under the pointer.
     @ViewBuilder
     private var floatingIcon: some View {
-        if let drag, let frame = drag.frames[drag.slot] {
+        if let drag, drag.slot != .split, let frame = drag.frames[drag.slot] {
             Group {
                 switch drag.slot {
                 case .perch:
@@ -255,8 +230,10 @@ struct ArrangeBar: View {
                 case .icon(let key):
                     if let item = item(key) {
                         BarIcon(item: item, image: images.image(for: item), invert: !images.iconsAreLight,
-                                width: nil, waiting: nil, clickable: false)
+                                width: nil, maxHeight: height, waiting: nil, clickable: false)
                     }
+                case .split:
+                    EmptyView()
                 }
             }
             .frame(width: frame.width, height: frame.height)
@@ -272,13 +249,13 @@ struct ArrangeBar: View {
             .updating($dragging) { _, down, _ in down = true }
             .onChanged { value in
                 if drag == nil, let (slot, frame) = frames.first(where: { $0.value.contains(value.startLocation) }),
-                   let row = rows.first(where: { $0.value.contains(slot) })?.key {
+                   let row = slot == .split ? .bar : rows.first(where: { $0.value.contains(slot) })?.key {
                     drag = DragState(
                         slot: slot, from: row, location: value.location,
                         grab: CGSize(width: value.startLocation.x - frame.minX, height: value.startLocation.y - frame.minY),
                         original: rows, frames: frames, rowFrames: rowFrames
                     )
-                    arrangeLog.debug("drag started from \(row.title, privacy: .public)")
+                    arrangeLog.debug("drag started from \(slot == .split ? "the line" : row.title, privacy: .public)")
                 } else if drag == nil, !ignoredDrag {
                     ignoredDrag = true
                     arrangeLog.debug("drag ignored: nothing under the pointer")
@@ -290,33 +267,49 @@ struct ArrangeBar: View {
 
     // MARK: - Order
 
-    /// The row under the pointer while dragging. Perch's own item stays in the bar.
+    /// The side of the line under the pointer while dragging. Perch's own item stays in the bar.
     private var targetRow: Row? {
         guard let drag else { return nil }
-        if drag.slot == .perch { return .bar }
-        let rows = drag.rowFrames.filter { $0.key != .off }
-        let hit = rows.first { $0.value.insetBy(dx: -40, dy: -4).contains(drag.location) }?.key
-        return hit ?? rows.min { abs($0.value.midY - drag.location.y) < abs($1.value.midY - drag.location.y) }?.key
+        if drag.slot == .perch || drag.slot == .split { return .bar }
+        guard let bar = drag.rowFrames[.bar] else { return .bar }
+        // The line sits between the two sides; its middle is the boundary.
+        return drag.location.x < bar.minX - 7 ? .hidden : .bar
     }
 
-    /// What each row shows: the live layout, the layout you dropped while Perch
+    /// What each side shows: the live layout, the layout you dropped while Perch
     /// moves the icon, or the layout you're dragging into.
     private var rows: [Row: [Slot]] {
         guard let drag else { return pending ?? liveRows }
+        if drag.slot == .split { return splitRows(drag) }
         var result = drag.original.mapValues { $0.filter { $0 != drag.slot } }
-        // From Turned off, icons can't be placed: show them back where they were.
-        guard drag.from != .off, let row = targetRow else { return drag.original }
+        guard let row = targetRow else { return drag.original }
         let others = result[row] ?? []
         let index = others.firstIndex { (drag.frames[$0]?.midX ?? .infinity) > drag.location.x } ?? others.count
         result[row, default: []].insert(drag.slot, at: index)
         return result
     }
 
+    /// While you drag the line: every icon left of the pointer is hidden.
+    /// Perch's own item stays in the bar, next to the icon it was next to.
+    private func splitRows(_ drag: DragState) -> [Row: [Slot]] {
+        let hidden = drag.original[.hidden] ?? []
+        let bar = drag.original[.bar] ?? []
+        let icons = hidden + bar.filter { $0 != .perch }
+        let count = icons.filter { (drag.frames[$0]?.midX ?? .infinity) < drag.location.x }.count
+        var newBar = Array(icons.dropFirst(count))
+        if let perch = bar.firstIndex(of: .perch) {
+            let after = bar.dropFirst(perch + 1).first
+            let index = after.flatMap { newBar.firstIndex(of: $0) } ?? (after == nil ? newBar.count : 0)
+            newBar.insert(.perch, at: index)
+        }
+        return [.hidden: Array(icons.prefix(count)), .bar: newBar]
+    }
+
     private var liveRows: [Row: [Slot]] {
         let byX = icons.sorted { $0.frame.minX < $1.frame.minX }
         // Moves waiting for Arrange to close: show the order you set.
         if let queued = engine.queuedBar {
-            let present = Set(byX.filter(\.isInMenuBar).map(\.key))
+            let present = Set(byX.map(\.key))
             var bar = queued.compactMap { spot -> Slot? in
                 switch spot {
                 case .icon(let key): return present.contains(key) ? .icon(key) : nil
@@ -328,27 +321,26 @@ struct ArrangeBar: View {
                 switch slot {
                 case .icon(let key): return byX.first { $0.key == key }?.frame.minX
                 case .perch: return engine.perchMinX
+                case .split: return nil
                 }
             }
-            for item in byX where item.isInMenuBar && !engine.queuedFrom.contains(item.key)
+            for item in byX where !engine.queuedFrom.contains(item.key)
                 && preferences.priority(for: item.key) == .shown {
                 let index = bar.firstIndex { (minX($0) ?? -.infinity) > item.frame.minX } ?? bar.count
                 bar.insert(.icon(item.key), at: index)
             }
-            let hidden = engine.inHiddenOrder(byX.filter { $0.isInMenuBar && !bar.contains(.icon($0.key)) })
+            let hidden = engine.inHiddenOrder(byX.filter { !bar.contains(.icon($0.key)) })
                 .map { Slot.icon($0.key) }
-            return [.bar: bar, .hidden: hidden, .off: byX.filter { !$0.isInMenuBar }.map { Slot.icon($0.key) }]
+            return [.bar: bar, .hidden: hidden]
         }
-        var bar = byX.filter { $0.isInMenuBar && preferences.priority(for: $0.key) == .shown }.map { Slot.icon($0.key) }
+        let shown = byX.filter { preferences.priority(for: $0.key) == .shown }
+        var bar = shown.map { Slot.icon($0.key) }
         if let perchX = engine.perchMinX {
-            let index = byX.filter { $0.isInMenuBar && preferences.priority(for: $0.key) == .shown }
-                .firstIndex { $0.frame.minX > perchX } ?? bar.count
-            bar.insert(.perch, at: index)
+            bar.insert(.perch, at: shown.firstIndex { $0.frame.minX > perchX } ?? bar.count)
         }
-        let hidden = engine.inHiddenOrder(byX.filter { $0.isInMenuBar && preferences.priority(for: $0.key) == .hidden })
+        let hidden = engine.inHiddenOrder(byX.filter { preferences.priority(for: $0.key) == .hidden })
             .map { Slot.icon($0.key) }
-        let off = byX.filter { !$0.isInMenuBar }.map { Slot.icon($0.key) }
-        return [.bar: bar, .hidden: hidden, .off: off]
+        return [.bar: bar, .hidden: hidden]
     }
 
     private func commit() {
@@ -356,14 +348,14 @@ struct ArrangeBar: View {
         let final = rows
         let row = targetRow
         self.drag = nil
-        if drag.from == .off, case .icon(let key) = drag.slot, let item = item(key), row != nil {
-            explainOff(item)
+        if drag.slot == .split {
+            commitSplit(from: drag.original, to: final)
             return
         }
         guard let row, final != drag.original,
               let index = final[row]?.firstIndex(of: drag.slot)
         else {
-            arrangeLog.debug("drop ignored: \(row == nil ? "no row" : "same spot", privacy: .public) (from \(drag.from.title, privacy: .public), over \(row?.title ?? "none", privacy: .public) at \(Int(drag.location.x), privacy: .public),\(Int(drag.location.y), privacy: .public); rows \(drag.rowFrames.map { "\($0.key.title) y\(Int($0.value.minY))-\(Int($0.value.maxY))" }.sorted().joined(separator: " "), privacy: .public))")
+            arrangeLog.debug("drop ignored: \(row == nil ? "no side" : "same spot", privacy: .public) (from \(drag.from.title, privacy: .public) at \(Int(drag.location.x), privacy: .public),\(Int(drag.location.y), privacy: .public))")
             return
         }
 
@@ -374,38 +366,61 @@ struct ArrangeBar: View {
         switch next {
         case .icon(let key)?: anchor = .icon(key)
         case .perch?: anchor = .perch
-        case nil: anchor = shown ? .end : .divider
+        case .split?, nil: anchor = shown ? .end : .divider
         }
         pending = final
-        offHint = nil
         switch drag.slot {
         case .perch:
             _ = engine.placePerch(.before(anchor, shown: true))
-            pending = nil
         case .icon(let key):
-            guard let item = item(key) else { return }
+            guard let item = item(key) else { break }
             arrangeLog.debug("dropped \(item.displayName, privacy: .public) in \(row.title, privacy: .public)")
-            // Accepted: Arrange draws the engine's order from here. Refused: back to the bar.
+            // Accepted: Arrange draws the engine's order from here. Refused: back where it was.
             _ = engine.place(item, .before(anchor, shown: shown))
-            pending = nil
+        case .split:
+            break
         }
+        pending = nil
     }
 
-    /// Perch can't turn another app's icon back on; System Settings can.
-    private func explainOff(_ item: MenuBarItem) {
-        offHint = "Turn on \(item.displayName) under Allow in the Menu Bar, then it will show up here."
-        if let url = URL(string: "x-apple.systempreferences:com.apple.ControlCenter-Settings.extension") {
-            NSWorkspace.shared.open(url)
+    /// The line moved: the icons it passed change sides, one move each, so
+    /// they keep their order.
+    private func commitSplit(from original: [Row: [Slot]], to final: [Row: [Slot]]) {
+        let before = original[.hidden] ?? []
+        let after = final[.hidden] ?? []
+        guard before.count != after.count else { return }
+        arrangeLog.debug("line moved by \(after.count - before.count, privacy: .public)")
+        if after.count < before.count {
+            // Shown at the left end of the bar, nearest the line first.
+            var anchor: LayoutEngine.Anchor
+            switch (original[.bar] ?? []).first {
+            case .icon(let key)?: anchor = .icon(key)
+            case .perch?: anchor = .perch
+            case .split?, nil: anchor = .end
+            }
+            for slot in before[after.count...].reversed() {
+                guard case .icon(let key) = slot, let item = item(key) else { continue }
+                guard engine.place(item, .before(anchor, shown: true)) else { break }
+                anchor = .icon(key)
+            }
+        } else {
+            // Hidden at the right end of Hidden, in order.
+            for slot in after[before.count...] {
+                guard case .icon(let key) = slot, let item = item(key) else { continue }
+                guard engine.place(item, .before(.divider, shown: false)) else { break }
+            }
         }
     }
 
     // MARK: - Icons
 
+    /// Icons in the menu bar that Perch can move. (Icons turned off in System
+    /// Settings aren't in the bar, so Arrange leaves them out.)
     private var icons: [MenuBarItem] {
-        engine.items.filter { $0.isMovable || !$0.isInMenuBar }.filter { !$0.isFixed }
+        engine.items.filter { $0.isMovable && $0.isInMenuBar }
     }
 
-    /// Why an icon is drawn faded: it isn't where its row says yet.
+    /// Why an icon is drawn faded: it isn't where its side says yet.
     private func waitingNote(for item: MenuBarItem, in row: Row) -> String? {
         if engine.hasQueuedMoves { return nil }
         return row == .bar && item.section == .hidden ? "no room right now" : nil
@@ -418,6 +433,16 @@ struct ArrangeBar: View {
     /// Changes whenever an icon appears, goes or moves.
     private var barSignature: [String] {
         icons.map { "\($0.key)@\(Int($0.frame.minX))" }
+    }
+}
+
+/// What Arrange has to tell you, if anything.
+enum ArrangeNotes {
+    @MainActor
+    static func text(_ engine: LayoutEngine) -> String? {
+        if let notice = engine.notice { return notice }
+        if engine.waitsForClose { return "The menu bar updates when you close Arrange." }
+        return nil
     }
 }
 
@@ -435,7 +460,8 @@ private struct RowFrames: PreferenceKey {
     }
 }
 
-private struct ContentWidth: PreferenceKey {
+/// How wide Arrange's strip is, so the panel around it can fit it.
+struct ArrangeStripWidth: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
@@ -467,8 +493,10 @@ private struct BarIcon: View {
     let image: NSImage?
     /// The picture was taken on a light menu bar; Arrange is dark.
     let invert: Bool
-    /// The icon's real width in the bar, so rows are drawn to scale.
+    /// The icon's real width in the bar, so the strip is drawn to scale.
     let width: CGFloat?
+    /// Pictures are drawn at their real size, up to the strip's height.
+    let maxHeight: CGFloat
     /// Why it's drawn faded: it isn't in its row's spot yet (no room, or its
     /// app hasn't reopened since you moved it).
     let waiting: String?
@@ -483,7 +511,7 @@ private struct BarIcon: View {
                     .interpolation(.high)
                     .aspectRatio(contentMode: .fit)
                     .modifier(LightOnDark(active: invert))
-                    .frame(height: min(image.size.height, 24))
+                    .frame(height: min(image.size.height, maxHeight))
                     .frame(minWidth: width == nil ? 22 : nil)
             } else {
                 ItemIcon(item: item)
@@ -539,50 +567,119 @@ struct PermissionCard: View {
     }
 }
 
-/// The Arrange panel under Perch's icon.
+/// Where Arrange over the menu bar goes, in points from the screen's left edge.
+struct OverBarGeometry: Equatable {
+    /// The screen's width; the panel spans it.
+    let width: CGFloat
+    let barHeight: CGFloat
+    /// Where the band starts: the screen's left edge, or right of the notch.
+    let bandStart: CGFloat
+    /// Where it ends: just left of the clock and Control Center, which stay visible.
+    let bandEnd: CGFloat
+}
+
+/// The Arrange panel: the strip under the menu bar, or over it.
 struct ArrangePanelView: View {
     @ObservedObject var engine: LayoutEngine
-    let preferences: Preferences
+    @ObservedObject var preferences: Preferences
     let permissions: Permissions
     let images: IconImages
-    let maxWidth: CGFloat
+    /// Where the menu bar is, for Arrange over it. Read each time it draws.
+    let overBar: () -> OverBarGeometry?
     let onOpenItem: (MenuBarItem) -> Void
     let onOpenSettings: () -> Void
+    let onDone: () -> Void
 
-    init(engine: LayoutEngine, preferences: Preferences, permissions: Permissions, images: IconImages,
-         maxWidth: CGFloat, onOpenItem: @escaping (MenuBarItem) -> Void, onOpenSettings: @escaping () -> Void) {
-        self.engine = engine
-        self.preferences = preferences
-        self.permissions = permissions
-        self.images = images
-        self.maxWidth = maxWidth
-        self.onOpenItem = onOpenItem
-        self.onOpenSettings = onOpenSettings
-    }
+    @State private var stripWidth: CGFloat = 0
 
     var body: some View {
-        // The rows, and a gear for Settings on the left, where the rows have
-        // room. Settings and Quit are also a right-click (or ⌘,) away.
-        HStack(spacing: 6) {
-            SettingsGear(action: onOpenSettings)
-            ArrangeBar(engine: engine, preferences: preferences, permissions: permissions,
-                       images: images, onOpenItem: onOpenItem, maxWidth: maxWidth)
+        Group {
+            if preferences.arrangeStyle == .over, let geometry = overBar() {
+                over(geometry)
+            } else {
+                below
+            }
         }
-            .padding(8)
-            .frame(minWidth: 280, alignment: .leading)
-            .fixedSize()
-            .perchSurface(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .contextMenu {
-                Button("Settings…", action: onOpenSettings)
-                Divider()
-                Button("Quit Perch") { NSApp.terminate(nil) }
+        .environment(\.colorScheme, .dark)
+        .onPreferenceChange(ArrangeStripWidth.self) { stripWidth = $0 }
+        .contextMenu {
+            Button("Settings…", action: onOpenSettings)
+            Divider()
+            Button("Quit Perch") { NSApp.terminate(nil) }
+        }
+        .background {
+            Button("Settings…", action: onOpenSettings)
+                .keyboardShortcut(",", modifiers: .command)
+                .opacity(0)
+                .allowsHitTesting(false)
+        }
+    }
+
+    private func strip(height: CGFloat = 32, notes: Bool = true) -> some View {
+        ArrangeBar(engine: engine, preferences: preferences, permissions: permissions,
+                   images: images, onOpenItem: onOpenItem, height: height, showsNotes: notes)
+    }
+
+    /// One dark bar under the menu bar: the gear, then the strip.
+    private var below: some View {
+        HStack(alignment: .top, spacing: 2) {
+            SettingsGear(action: onOpenSettings)
+                .frame(height: 32)
+            strip()
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+        .fixedSize()
+        .perchSurface(RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+
+    /// The menu bar turns into the strip, with a small toolbar under it. If
+    /// the strip doesn't fit (beside a notch), it's the bar under the menu bar instead.
+    @ViewBuilder
+    private func over(_ geometry: OverBarGeometry) -> some View {
+        let band = geometry.bandEnd - geometry.bandStart
+        let fits = stripWidth == 0 || stripWidth + 12 <= band
+        VStack(alignment: .leading, spacing: 6) {
+            if fits {
+                HStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    strip(height: geometry.barHeight, notes: false)
+                }
+                .padding(.trailing, 4)
+                .frame(width: band, height: geometry.barHeight)
+                .background(Color(white: 0.07))
+                .padding(.leading, geometry.bandStart)
+                toolbar
+                    .frame(width: geometry.bandEnd, alignment: .trailing)
+            } else {
+                Color.clear.frame(height: geometry.barHeight)
+                below
+                    .frame(width: geometry.bandEnd, alignment: .trailing)
             }
-            .background {
-                Button("Settings…", action: onOpenSettings)
-                    .keyboardShortcut(",", modifiers: .command)
-                    .opacity(0)
-                    .allowsHitTesting(false)
-            }
+        }
+        .frame(width: geometry.width, alignment: .topLeading)
+    }
+
+    private var toolbar: some View {
+        HStack(spacing: 6) {
+            Text(ArrangeNotes.text(engine) ?? "Drag icons to rearrange. Hidden icons are left of the line.")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .frame(maxWidth: 360, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+            Divider().frame(height: 16)
+            SettingsGear(action: onOpenSettings)
+            Button("Done", action: onDone)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .keyboardShortcut(.defaultAction)
+        }
+        .padding(.leading, 14)
+        .padding(.trailing, 6)
+        .padding(.vertical, 4)
+        .fixedSize()
+        .perchSurface(Capsule(style: .continuous))
     }
 }
 
