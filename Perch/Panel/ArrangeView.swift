@@ -561,9 +561,13 @@ struct ArrangePanelView: View {
     }
 
     var body: some View {
-        // Just the rows. Settings and Quit are a right-click (or ⌘,) away.
-        ArrangeBar(engine: engine, preferences: preferences, permissions: permissions,
-                   images: images, onOpenItem: onOpenItem, maxWidth: maxWidth)
+        // The rows, and a gear for Settings on the left, where the rows have
+        // room. Settings and Quit are also a right-click (or ⌘,) away.
+        HStack(spacing: 6) {
+            SettingsGear(action: onOpenSettings)
+            ArrangeBar(engine: engine, preferences: preferences, permissions: permissions,
+                       images: images, onOpenItem: onOpenItem, maxWidth: maxWidth)
+        }
             .padding(8)
             .frame(minWidth: 280, alignment: .leading)
             .fixedSize()
@@ -579,5 +583,25 @@ struct ArrangePanelView: View {
                     .opacity(0)
                     .allowsHitTesting(false)
             }
+    }
+}
+
+private struct SettingsGear: View {
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "gearshape")
+                .font(.system(size: 13))
+                .foregroundStyle(hovering ? .primary : .secondary)
+                .frame(width: 26, height: 26)
+                .background(Circle().fill(Color.white.opacity(hovering ? 0.12 : 0)))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help("Settings")
+        .accessibilityLabel("Settings")
     }
 }
