@@ -91,8 +91,21 @@ final class MenuBarController: NSObject, ObservableObject {
     /// False until Perch has Accessibility. Without it Perch can't tell empty
     /// menu bar space from an icon, so its icon stays in the bar.
     var hasAccessibility = AXIsProcessTrusted() {
-        didSet { if hasAccessibility != oldValue { updatePerchIcon() } }
+        didSet {
+            guard hasAccessibility != oldValue else { return }
+            updatePerchIcon()
+            if hasAccessibility, waitsForAccessibility {
+                waitsForAccessibility = false
+                Task { await firstHide() }
+            }
+        }
     }
+
+    /// Places the divider from a real look at the bar, before Perch first
+    /// hides anything (set by the layout engine).
+    var placeFirst: (() async -> Void)?
+    /// Perch started without Accessibility, so it hasn't hidden anything yet.
+    private var waitsForAccessibility = false
 
     /// What's in the bar for Perch right now.
     private var barItem: PerchBarItem { hasAccessibility ? preferences.barItem : .icon }
@@ -479,13 +492,25 @@ final class MenuBarController: NSObject, ObservableObject {
                     await beforeFirstHide()
                     self.beforeFirstHide = nil
                 }
-                collapse()
-                onReady?()
+                // Without Accessibility Perch can't see where icons are, so
+                // hiding would hide nearly all of them. Wait for the permission.
+                guard hasAccessibility else {
+                    log.notice("staying revealed until Perch has Accessibility")
+                    waitsForAccessibility = true
+                    return
+                }
+                await firstHide()
             }
             return
         }
         placementAttempts += 1
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in self?.waitForPlacement() }
+    }
+
+    private func firstHide() async {
+        await placeFirst?()
+        collapse()
+        onReady?()
     }
 
     private func perchIsRightOfDivider() -> Bool {
