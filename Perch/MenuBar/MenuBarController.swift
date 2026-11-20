@@ -37,9 +37,9 @@ final class MenuBarController: NSObject, ObservableObject {
     ]
 
     private static let collapsedLength: CGFloat = 10_000
-    /// Kept narrow so Perch takes as little of the bar as possible.
-    private static let perchLength: CGFloat = 18
-    private static let dividerLength: CGFloat = 6
+    /// Starting width; the real width hugs the icon (see `updatePerchIcon`).
+    private static let perchLength: CGFloat = 12
+    private static let dividerLength: CGFloat = 4
 
     @Published private(set) var visibility: Visibility = .revealed
 
@@ -288,19 +288,23 @@ final class MenuBarController: NSObject, ObservableObject {
     private func updatePerchIcon() {
         guard let button = perchItem.button else { return }
         let name = preferences.iconStyle.symbolName(revealed: visibility.isRevealed)
-        let config = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
+        // Small and tight: Perch should take as little of the bar as possible.
+        let config = NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
         let image = (NSImage(systemSymbolName: name, accessibilityDescription: "Perch")
             ?? NSImage(systemSymbolName: "circle", accessibilityDescription: "Perch"))?
             .withSymbolConfiguration(config)
         image?.isTemplate = true
         button.image = image
+        if let width = image?.size.width {
+            perchItem.length = ceil(width)
+        }
     }
 
     private static let dividerImage: NSImage = {
-        let image = NSImage(size: NSSize(width: 4, height: 14), flipped: false) { _ in
+        let image = NSImage(size: NSSize(width: 4, height: 12), flipped: false) { _ in
             let path = NSBezierPath()
             path.move(to: NSPoint(x: 2, y: 1.5))
-            path.line(to: NSPoint(x: 2, y: 12.5))
+            path.line(to: NSPoint(x: 2, y: 10.5))
             path.lineWidth = 1.5
             path.lineCapStyle = .round
             NSColor.black.withAlphaComponent(0.55).setStroke()
