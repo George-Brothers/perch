@@ -4,15 +4,17 @@
 
 A light menu bar manager for macOS. Perch hides the menu bar icons you don't need and brings them back with one click, without slowing your Mac down.
 
-> Early development. See [docs/FEATURES.md](docs/FEATURES.md) for what's built and what's next.
+> Early development, for macOS 26 (Tahoe). See [docs/FEATURES.md](docs/FEATURES.md) for what's built.
+
+<img src="docs/screenshots/arrange.png" width="720" alt="Arrange: the menu bar row in order, then Hidden">
 
 ## What it does
 
-- **Click empty menu bar space for Perch's bar.** Every icon that's hidden or doesn't fit drops down in a small bar under the menu bar. Click one and its menu opens right there, like any menu, with Perch's bar still showing. Nothing moves in the menu bar. Perch adds nothing to your bar unless you want it to: a thin line or an icon are options in Settings.
+- **Click empty menu bar space for Perch's bar.** Every icon that's hidden or doesn't fit drops down in a small bar under the menu bar. Click one and its menu opens right there, like any menu, with Perch's bar still showing. Nothing moves in the menu bar (if an app's menu can't be copied, Perch shows its icons for a moment instead). Perch adds nothing to your bar unless you want it to: a thin line or an icon are options in Settings.
 - **Put every icon where you want it.** Arrange mirrors your menu bar: the bar in order, then Hidden, then icons turned off in System Settings. Drag an icon anywhere and Perch moves the real one there. Order is priority: when the bar is full, icons on the left wait in Hidden until there's room.
 - **Fits your screen.** On a laptop, icons that would land behind the notch go to Perch's bar instead, in your order.
 - **Exact pictures (optional).** Perch's bar shows app icons, or with Screen Recording (Settings → Features), the icons exactly as they look.
-- **Spotlight.** Every menu bar icon shows up in Spotlight. Type its name and press Return to open its menu, even when it's hidden.
+- **Spotlight.** Every menu bar icon (except Live Activities) shows up in Spotlight. Type its name and press Return to open its menu, even when it's hidden.
 - **Shortcuts.** Show Hidden Icons, Arrange Menu Bar and Open Menu Bar Icon actions.
 - **Tighter spacing.** A slider fits more icons in the same bar.
 - **Launch at login.**
@@ -28,22 +30,23 @@ Perch uses about 15 MB of memory and no CPU while idle. It reacts to events and 
 
 ## Build
 
-Requires macOS 15 or later and Xcode 26.
+Requires macOS 26 and Xcode 26. There's no download yet: build it from source.
 
 ```sh
-./scripts/build.sh            # builds build/Perch.app
-./scripts/build.sh --install  # also copies it to /Applications and opens it
+./scripts/make-signing-cert.sh  # optional, once: keeps Accessibility across rebuilds
+./scripts/build.sh              # builds build/Perch.app
+./scripts/build.sh --install    # also copies it to /Applications and opens it
 ```
 
-Or open `Perch.xcodeproj` and press Run.
+Or open `Perch.xcodeproj` and press Run. Without the signing certificate, builds are ad-hoc signed and macOS asks for Accessibility again after each rebuild.
 
-Perch isn't notarized yet. The first time you open a downloaded copy, right-click it and choose Open.
+If macOS won't open a copy of Perch built on another Mac, open System Settings → Privacy & Security and click Open Anyway.
 
 ## How it works
 
 macOS has no API for hiding another app's menu bar icon. Perch adds a divider item and, when hiding, stretches it thousands of points wide. Everything to its left is pushed off the screen. Shrinking the divider brings them back.
 
-Perch never touches your mouse. macOS keeps a saved position for every menu bar icon. To fit your screen, Perch moves only its own divider, which is instant. Hiding the leftmost icon, showing the rightmost hidden one, and reordering Perch's bar are instant too: only the divider moves, and Perch keeps its bar's order itself. Any other move needs the bar to reset: Perch saves new positions and restarts Control Center, which on macOS 26 draws every app's menu bar icons and places them when it starts. Apple's icons blink for a moment (and Focus shows its name again); your apps never restart. So it happens once, when you close Arrange, however many icons you moved. Sandboxed apps (Shottr, OneDrive) keep their settings where macOS asks before every change, so Perch moves the icons around theirs instead. If an icon doesn't land, Arrange says so. Accessibility tells Perch where each icon is. A hidden icon sits off screen, so when Perch opens it, its menu opens off screen too. Perch reads that menu through Accessibility, closes it, and shows the same items as its own menu; picking one presses the real item. Icons that open a panel get the panel moved under Perch's bar.
+Perch never touches your mouse. macOS keeps a saved position for every menu bar icon. To fit your screen, Perch moves only its own divider, which is instant. Hiding the leftmost icon, showing the rightmost hidden one, and reordering Perch's bar are instant too: only the divider moves, and Perch keeps its bar's order itself. Any other move needs the bar to reset: Perch saves new positions and restarts Control Center, which on macOS 26 draws every app's menu bar icons and places them when it starts. Apple's icons blink for a moment (and Focus shows its name again); your apps never restart. So it happens once, when you close Arrange (or leave Settings → Icons), however many icons you moved. Sandboxed apps (Shottr, OneDrive) keep their settings where macOS asks before every change, so Perch moves the icons around theirs instead. If an icon doesn't land, Perch puts its saved spot back and says so the next time you open Arrange. Accessibility tells Perch where each icon is. A hidden icon sits off screen, so when Perch opens it, its menu opens off screen too. Perch reads that menu through Accessibility, closes it, and shows the same items as its own menu; picking one presses the real item. Icons that open a panel get the panel moved under Perch's bar.
 
 ## License
 

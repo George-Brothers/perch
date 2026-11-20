@@ -35,6 +35,7 @@
 29. `perch-first-launch`: without Accessibility Perch stays revealed (it can't see icons, and the seeded divider at 101 would hide nearly all of them). Every first hide, at launch or once Accessibility is granted, runs a real pass first (`placeFirst`), so only what doesn't fit is hidden.
 30. `perch-safe-moves` (council round 1): Settings → Icons holds moves too (`hold(_:for:)`); a drop during a pass isn't lost (the pass only clears the order it applied); icons that appear while moves wait keep their own priority and spot (`queuedFrom`); queued moves keep waiting for an open menu instead of giving up; no passes while the screen is locked; writes are all or nothing and failed moves are undone (`StatusItemPositions.restore`); restarts are at least 10.5 s apart (launchd throttles faster respawns, leaving the bar empty) and verification waits for the icons to come back; priorities change after verification; the kept run needs saved spots in order; hugs next to an unreadable spot stop halfway to the next known one. The old wait-for-next-launch code (`pendingMoves`) is gone.
 31. `perch-divider-fixes`: Perch's own item's room is reserved first; if the cut falls right of it, Perch moves to the cut and the divider is placed in the same pass (it used to wait for another trigger). Icons macOS places itself (the mic indicator) were counted twice; the walk skips them. Moving the divider or Perch's item ignored differences under 0.01, but hugged spots can be closer than that, so the divider never got between them; the tolerance is now 1e-6 and a no-op move reports false.
+32. `perch-public-docs`: macOS 26 minimum (deployment target and README), build-from-source instructions with the optional signing script, current Gatekeeper steps, README claims qualified (copied menus can fall back to revealing; Spotlight skips Live Activities), README screenshot.
 
 ## macOS 26 facts
 - Reading or writing another app's sandbox container (~/Library/Containers/<id>) triggers the "access data from other apps" prompt (kTCCServiceSystemPolicyAppData) and the call blocks until it's answered. Perch tells sandboxed apps by their code signature, never by touching the container.
@@ -54,4 +55,4 @@
 - Nothing can be moved or captured while the screen is locked; Perch skips passes then.
 
 ## Testing
-George's Mac is the test machine (MacBook Pro with notch, sometimes a Dell S3225QS as main display). Helpers live in the session scratchpad. Check the screen is unlocked and the front window before synthetic clicks.
+Testing happens on a MacBook Pro with a notch, sometimes with an external display as the main one. Perch never sends synthetic clicks; test drags go through a temporary in-app hook that feeds mouse events to Perch's own Arrange window (never committed).
