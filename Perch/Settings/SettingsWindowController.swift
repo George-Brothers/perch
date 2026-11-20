@@ -36,6 +36,7 @@ final class SettingsNavigation: ObservableObject {
 /// Builds the Settings window on first use and reuses it after that.
 @MainActor
 final class SettingsWindowController {
+    static let title = "Perch Settings"
     private let navigation = SettingsNavigation()
     private let makeContent: (SettingsNavigation) -> AnyView
     private var window: NSWindow?
@@ -50,7 +51,7 @@ final class SettingsWindowController {
         if window == nil {
             let hosting = NSHostingController(rootView: makeContent(navigation))
             let window = NSWindow(contentViewController: hosting)
-            window.title = "Perch Settings"
+            window.title = Self.title
             window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
             window.toolbarStyle = .unified
             window.isReleasedWhenClosed = false

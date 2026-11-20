@@ -98,7 +98,7 @@ struct ArrangeBar: View {
                 .animation(.snappy(duration: 0.18), value: rows)
 
                 if engine.waitsForClose {
-                    Text("The menu bar updates when you close Arrange.")
+                    Text("The menu bar updates when you close this.")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .frame(width: rowWidth + labelWidth, alignment: .leading)
@@ -106,14 +106,6 @@ struct ArrangeBar: View {
 
                 if let notice = engine.notice {
                     Text(notice)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(width: rowWidth + labelWidth, alignment: .leading)
-                }
-
-                if !waitingApps.isEmpty {
-                    Text("\(waitingApps.formatted(.list(type: .and))) will move the next time \(waitingApps.count == 1 ? "it opens" : "they open"). To move \(waitingApps.count == 1 ? "it" : "them") now, ⌘-drag in the menu bar.")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -272,10 +264,10 @@ struct ArrangeBar: View {
                         grab: CGSize(width: value.startLocation.x - frame.minX, height: value.startLocation.y - frame.minY),
                         original: rows, frames: frames, rowFrames: rowFrames
                     )
-                    arrangeLog.notice("drag started from \(row.title, privacy: .public)")
+                    arrangeLog.debug("drag started from \(row.title, privacy: .public)")
                 } else if drag == nil, !ignoredDrag {
                     ignoredDrag = true
-                    arrangeLog.notice("drag ignored: nothing under the pointer")
+                    arrangeLog.debug("drag ignored: nothing under the pointer")
                 }
                 drag?.location = value.location
             }
@@ -345,7 +337,7 @@ struct ArrangeBar: View {
         guard let row, final != drag.original,
               let index = final[row]?.firstIndex(of: drag.slot)
         else {
-            arrangeLog.notice("drop ignored: \(row == nil ? "no row" : "same spot", privacy: .public) (from \(drag.from.title, privacy: .public), over \(row?.title ?? "none", privacy: .public) at \(Int(drag.location.x), privacy: .public),\(Int(drag.location.y), privacy: .public); rows \(drag.rowFrames.map { "\($0.key.title) y\(Int($0.value.minY))-\(Int($0.value.maxY))" }.sorted().joined(separator: " "), privacy: .public))")
+            arrangeLog.debug("drop ignored: \(row == nil ? "no row" : "same spot", privacy: .public) (from \(drag.from.title, privacy: .public), over \(row?.title ?? "none", privacy: .public) at \(Int(drag.location.x), privacy: .public),\(Int(drag.location.y), privacy: .public); rows \(drag.rowFrames.map { "\($0.key.title) y\(Int($0.value.minY))-\(Int($0.value.maxY))" }.sorted().joined(separator: " "), privacy: .public))")
             return
         }
 
@@ -362,11 +354,14 @@ struct ArrangeBar: View {
         offHint = nil
         switch drag.slot {
         case .perch:
-            engine.placePerch(.before(anchor, shown: true))
+            _ = engine.placePerch(.before(anchor, shown: true))
+            pending = nil
         case .icon(let key):
             guard let item = item(key) else { return }
             arrangeLog.notice("dropped \(item.displayName, privacy: .public) in \(row.title, privacy: .public)")
-            if !engine.place(item, .before(anchor, shown: shown)) { pending = nil }
+            // Accepted: Arrange draws the engine's order from here. Refused: back to the bar.
+            _ = engine.place(item, .before(anchor, shown: shown))
+            pending = nil
         }
     }
 
@@ -384,17 +379,9 @@ struct ArrangeBar: View {
         engine.items.filter { $0.isMovable || !$0.isInMenuBar }.filter { !$0.isFixed }
     }
 
-    /// Apps whose icons move the next time they open.
-    private var waitingApps: [String] {
-        Array(Set(engine.pendingMoves.values.map(\.name))).sorted()
-    }
-
     /// Why an icon is drawn faded: it isn't where its row says yet.
     private func waitingNote(for item: MenuBarItem, in row: Row) -> String? {
         if engine.hasQueuedMoves { return nil }
-        if let move = engine.pendingMoves[item.key] {
-            return move.hides ? "hides the next time it opens" : "moves the next time it opens"
-        }
         return row == .bar && item.section == .hidden ? "no room right now" : nil
     }
 

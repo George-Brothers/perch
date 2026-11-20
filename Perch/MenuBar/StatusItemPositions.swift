@@ -8,8 +8,9 @@ import os
 /// means further right. macOS sorts the whole bar by these numbers.
 ///
 /// That's how Perch moves icons without touching the mouse. It saves a new
-/// number for an icon, and the icon goes there when its app next starts.
-/// Perch's own items move at once, since Perch can recreate them itself.
+/// number for an icon, and the icon goes there the next time Control Center
+/// starts (see `AppRestarter`). Perch's own items move at once, since Perch
+/// can recreate them itself.
 enum StatusItemPositions {
     static let prefix = "NSStatusItem Preferred Position "
     private static let log = Logger(subsystem: "com.georgebrothers.perch", category: "positions")
@@ -22,7 +23,7 @@ enum StatusItemPositions {
         let name: String
         var value: Double?
         /// In a sandboxed app's container. macOS asks the user before every
-        /// change there, so Perch never writes it (see `LayoutEngine.movesAround`).
+        /// change there, so Perch never writes it (see `LayoutEngine.plan`).
         var isPrivate: Bool { domain.hasPrefix("/") }
     }
 
@@ -76,8 +77,8 @@ enum StatusItemPositions {
         return result
     }
 
-    /// Writes off the main thread. False if it didn't finish within `limit`
-    /// (macOS may be asking permission to change a sandboxed app's settings).
+    /// Writes off the main thread. False if macOS didn't save it or it didn't
+    /// finish within `limit`.
     static func write(_ value: Double, for slot: Slot, within limit: TimeInterval) async -> Bool {
         await withCheckedContinuation { continuation in
             let lock = NSLock()
@@ -90,20 +91,32 @@ enum StatusItemPositions {
                 continuation.resume(returning: done)
             }
             DispatchQueue.global(qos: .userInitiated).async {
-                write(value, for: slot)
-                finish(true)
+                finish(write(value, for: slot))
             }
             DispatchQueue.global().asyncAfter(deadline: .now() + limit) { finish(false) }
         }
     }
 
-    private static func write(_ value: Double, for slot: Slot) {
-        let id = slot.domain as CFString
-        CFPreferencesSetValue((prefix + slot.name) as CFString, value as NSNumber, id,
-                              kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
-        if !CFPreferencesAppSynchronize(id) {
-            log.error("Couldn't save a position for \(slot.domain, privacy: .public)")
+    /// Puts back the spot `slot` had (or removes it, if it had none).
+    static func restore(_ slot: Slot) async {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                _ = write(slot.value, for: slot)
+                continuation.resume()
+            }
         }
+    }
+
+    /// False if macOS didn't save it.
+    private static func write(_ value: Double?, for slot: Slot) -> Bool {
+        let id = slot.domain as CFString
+        CFPreferencesSetValue((prefix + slot.name) as CFString, value.map { $0 as NSNumber }, id,
+                              kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+        guard CFPreferencesAppSynchronize(id) else {
+            log.error("Couldn't save a position for \(slot.domain, privacy: .public)")
+            return false
+        }
+        return true
     }
 
     /// Works out which saved position belongs to which icon.
@@ -174,13 +187,21 @@ enum StatusItemPositions {
 /// spots without restarting any app. It has no windows and macOS starts it
 /// again by itself; Apple's icons blink for a moment.
 enum AppRestarter {
-    static func restartControlCenter() async {
+    @MainActor private static var lastRestart: Date?
+
+    @MainActor static func restartControlCenter() async {
+        // launchd waits 10 s before bringing back a process that ran for less
+        // than that, leaving the bar without icons; space restarts out.
+        if let lastRestart, Date().timeIntervalSince(lastRestart) < 10.5 {
+            try? await Task.sleep(for: .seconds(10.5 - Date().timeIntervalSince(lastRestart)))
+        }
         guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.controlcenter").first
         else { return }
+        lastRestart = Date()
         kill(app.processIdentifier, SIGTERM)
         // Gone, then back with its icons drawn.
         for _ in 0..<60 where !app.isTerminated { try? await Task.sleep(for: .milliseconds(50)) }
-        for _ in 0..<60 {
+        for _ in 0..<240 {
             if let next = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.controlcenter").first,
                next.processIdentifier != app.processIdentifier, next.isFinishedLaunching { break }
             try? await Task.sleep(for: .milliseconds(50))

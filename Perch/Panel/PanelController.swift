@@ -119,7 +119,9 @@ final class PanelController {
             if panel.frame.origin != origin { panel.setFrameOrigin(origin) }
             return
         }
-        let anchorFrame = anchor?()
+        // While Control Center restarts, Perch's items can briefly report a
+        // frame away from the menu bar; hang from the top of the screen then.
+        let anchorFrame = anchor?().flatMap { MenuBarGeometry.isInMenuBar(NSPoint(x: $0.midX, y: $0.midY)) ? $0 : nil }
         let screen = anchorFrame.flatMap(PanelAnchorScreen.of) ?? NSScreen.main
         guard let visible = screen?.visibleFrame else { return }
 
