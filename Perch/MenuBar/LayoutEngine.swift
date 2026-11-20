@@ -598,14 +598,25 @@ final class LayoutEngine: ObservableObject {
         let right = rightEntry?.position
         switch (left, right) {
         case let (l?, r?) where leftEntry?.isGuess == true && rightEntry?.isGuess != true:
-            return r + min(0.05, (l - r) / 16)
+            return representable(r + min(0.05, (l - r) / 16), between: l, and: r)
         case let (l?, r?) where rightEntry?.isGuess == true && leftEntry?.isGuess != true:
-            return l - min(0.05, (l - r) / 16)
-        case let (l?, r?): return r + min(1, (l - r) / 2)
+            return representable(l - min(0.05, (l - r) / 16), between: l, and: r)
+        case let (l?, r?): return representable(r + min(1, (l - r) / 2), between: l, and: r)
         case let (nil, r?): return r + 1
         case let (l?, nil): return l - 1
         default: return nil
         }
+    }
+
+    /// `value`, or the nearest spot macOS can keep (32-bit) that's still
+    /// strictly between `l` and `r`: a hug that rounds onto a neighbor's spot
+    /// would tie with it.
+    private static func representable(_ value: Double, between l: Double, and r: Double) -> Double {
+        let f = Float(value), fl = Float(l), fr = Float(r)
+        if f > fr && f < fl { return value }
+        if f <= fr, fr.nextUp < fl { return Double(fr.nextUp) }
+        if f >= fl, fl.nextDown > fr { return Double(fl.nextDown) }
+        return value
     }
 
     // MARK: Spots from Arrange
