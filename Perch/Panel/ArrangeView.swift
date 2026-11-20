@@ -97,6 +97,13 @@ struct ArrangeBar: View {
                 .onPreferenceChange(ContentWidth.self) { contentWidth = $0 }
                 .animation(.snappy(duration: 0.18), value: rows)
 
+                if engine.waitsForClose {
+                    Text("The menu bar updates when you close Arrange.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .frame(width: rowWidth + labelWidth, alignment: .leading)
+                }
+
                 if let notice = engine.notice {
                     Text(notice)
                         .font(.system(size: 11))
@@ -125,7 +132,7 @@ struct ArrangeBar: View {
             .onChange(of: engine.isArranging) { _, arranging in
                 if !arranging && !engine.hasQueuedMoves { pending = nil }
             }
-            .onChange(of: barSignature) { _, _ in if !engine.isArranging { pending = nil } }
+            .onChange(of: barSignature) { _, _ in if !engine.isArranging && !engine.hasQueuedMoves { pending = nil } }
         }
     }
 
@@ -226,8 +233,8 @@ struct ArrangeBar: View {
         Text(item.displayName)
         Divider()
         switch row {
-        case .bar: Button("Hide") { engine.place(item, .before(.divider, shown: false), priority: .hidden) }
-        case .hidden: Button("Show in Menu Bar") { engine.place(item, .before(.divider, shown: true), priority: .shown) }
+        case .bar: Button("Hide") { engine.place(item, .before(.divider, shown: false)) }
+        case .hidden: Button("Show in Menu Bar") { engine.place(item, .before(.divider, shown: true)) }
         case .off: Button("Turn On in System Settings…") { explainOff(item) }
         }
     }
@@ -301,6 +308,19 @@ struct ArrangeBar: View {
 
     private var liveRows: [Row: [Slot]] {
         let byX = icons.sorted { $0.frame.minX < $1.frame.minX }
+        // Moves waiting for Arrange to close: show the order you set.
+        if let queued = engine.queuedBar {
+            let present = Set(byX.filter(\.isInMenuBar).map(\.key))
+            let bar = queued.compactMap { spot -> Slot? in
+                switch spot {
+                case .icon(let key): return present.contains(key) ? .icon(key) : nil
+                case .perch: return engine.perchMinX == nil ? nil : .perch
+                }
+            }
+            let hidden = engine.inHiddenOrder(byX.filter { $0.isInMenuBar && !bar.contains(.icon($0.key)) })
+                .map { Slot.icon($0.key) }
+            return [.bar: bar, .hidden: hidden, .off: byX.filter { !$0.isInMenuBar }.map { Slot.icon($0.key) }]
+        }
         var bar = byX.filter { $0.isInMenuBar && preferences.priority(for: $0.key) == .shown }.map { Slot.icon($0.key) }
         if let perchX = engine.perchMinX {
             let index = byX.filter { $0.isInMenuBar && preferences.priority(for: $0.key) == .shown }
@@ -346,7 +366,7 @@ struct ArrangeBar: View {
         case .icon(let key):
             guard let item = item(key) else { return }
             arrangeLog.notice("dropped \(item.displayName, privacy: .public) in \(row.title, privacy: .public)")
-            engine.place(item, .before(anchor, shown: shown), priority: shown ? .shown : .hidden)
+            if !engine.place(item, .before(anchor, shown: shown)) { pending = nil }
         }
     }
 
@@ -371,6 +391,7 @@ struct ArrangeBar: View {
 
     /// Why an icon is drawn faded: it isn't where its row says yet.
     private func waitingNote(for item: MenuBarItem, in row: Row) -> String? {
+        if engine.hasQueuedMoves { return nil }
         if let move = engine.pendingMoves[item.key] {
             return move.hides ? "hides the next time it opens" : "moves the next time it opens"
         }

@@ -6,8 +6,8 @@ import os
 /// in your order, and the rest go left of it (into Perch's bar).
 ///
 /// It never touches the mouse. What fits is settled by moving Perch's own
-/// divider. An icon you move in Arrange gets a new saved position, which its
-/// app picks up the next time it opens (see `StatusItemPositions`).
+/// divider. Other moves save new positions for the icons that have to move
+/// and restart Control Center once, which places them (see `commit`).
 ///
 /// It reacts to events only (launch, a priority change, a display change, wake,
 /// an app opening or quitting) and moves nothing when the bar is already right.
@@ -46,27 +46,89 @@ final class LayoutEngine: ObservableObject {
         preferences.setPriority(priority, for: item.key)
     }
 
-    /// Exact spots asked for in Arrange, done by the next pass.
-    private var placements: [String: Placement] = [:]
+    /// Something in the shown part of the bar that Arrange can place.
+    enum Spot: Hashable {
+        case icon(String)
+        case perch
+    }
 
-    /// Moves an icon to an exact spot (from Arrange) and gives it `priority`.
-    func place(_ item: MenuBarItem, _ placement: Placement, priority: IconPriority) {
-        if case .before(let anchor, shown: false) = placement {
-            setHiddenOrder(item.key, before: anchor)
+    /// The order you set in Arrange, until the bar matches it: what shows,
+    /// left to right. Movable icons not in it go to the hidden side.
+    private var queued: [Spot]? {
+        didSet { if queued != oldValue { queuedBar = queued } }
+    }
+    /// What's waiting, for Arrange to draw instead of the bar as it is.
+    @Published private(set) var queuedBar: [Spot]?
+
+    /// While Arrange is open, moves that need the bar to reset wait until it
+    /// closes: one reset however many icons you move. (Each reset makes macOS
+    /// redraw its own icons, and Focus shows its name again.) Moves that only
+    /// need the divider still happen right away.
+    var holdsMoves = false {
+        didSet {
+            guard holdsMoves != oldValue else { return }
+            if !holdsMoves, queued != nil { scheduleArrange(after: 0.05) }
         }
-        placements[item.key] = placement
-        preferences.setPriority(priority, for: item.key)
-        // Right away: you just dropped it. (Replaces the slower pass the
-        // priority change schedules for other triggers.)
+    }
+    /// Moves are waiting for Arrange to close.
+    @Published private(set) var waitsForClose = false
+
+    /// Something to tell you in Arrange about the last move, if it didn't work.
+    @Published private(set) var notice: String?
+
+    /// Moves an icon to a spot, from Arrange or Perch's bar. False if Perch
+    /// can't put it there (next to an app whose icons Perch can't move, say).
+    @discardableResult
+    func place(_ item: MenuBarItem, _ placement: Placement) -> Bool {
+        guard case .before(let anchor, let shown) = placement else { return false }
+        var order = queued ?? shownOrder(in: items)
+        order.removeAll { $0 == .icon(item.key) }
+        if shown { order.insert(.icon(item.key), at: insertionIndex(for: anchor, in: order)) }
+        guard plan(order, in: items) != nil else {
+            log.notice("can't put \(item.displayName, privacy: .public) there")
+            notice = "Perch can't put \(item.displayName) there. ⌘-drag it in the menu bar instead."
+            return false
+        }
+        if !shown { setHiddenOrder(item.key, before: anchor, shown: order) }
+        notice = nil
+        queued = order
+        // Right away: you just dropped it.
         scheduleArrange(after: 0.02)
+        return true
     }
 
     /// Where to put Perch's own item (its line or icon), from Arrange.
-    private var perchPlacement: Placement?
-
     func placePerch(_ placement: Placement) {
-        perchPlacement = placement
-        scheduleArrange(after: 0.05)
+        guard case .before(let anchor, _) = placement else { return }
+        var order = queued ?? shownOrder(in: items)
+        order.removeAll { $0 == .perch }
+        order.insert(.perch, at: insertionIndex(for: anchor, in: order))
+        guard plan(order, in: items) != nil else { return }
+        queued = order
+        scheduleArrange(after: 0.02)
+    }
+
+    /// What's meant to show now, left to right.
+    private func shownOrder(in items: [MenuBarItem]) -> [Spot] {
+        entries(for: items).compactMap { entry in
+            switch entry.kind {
+            case .perch: return .perch
+            case .fixed: return nil
+            case .icon(let key):
+                guard items.first(where: { $0.key == key })?.isMovable == true,
+                      preferences.priority(for: key) == .shown else { return nil }
+                return .icon(key)
+            }
+        }
+    }
+
+    private func insertionIndex(for anchor: Anchor, in order: [Spot]) -> Int {
+        switch anchor {
+        case .icon(let key): return order.firstIndex(of: .icon(key)) ?? order.count
+        case .perch: return order.firstIndex(of: .perch) ?? order.count
+        case .end: return order.count
+        case .divider: return 0
+        }
     }
 
     /// Perch's own x position, so Arrange can show where it sits among the icons.
@@ -86,7 +148,7 @@ final class LayoutEngine: ObservableObject {
     }
 
     /// Moves asked for in Arrange that no pass has picked up yet.
-    var hasQueuedMoves: Bool { !placements.isEmpty || perchPlacement != nil }
+    var hasQueuedMoves: Bool { queued != nil }
 
     /// Asks for an arrange pass after `delay`. Repeated requests collapse into one.
     func scheduleArrange(after delay: TimeInterval = 0.4) {
@@ -176,7 +238,8 @@ final class LayoutEngine: ObservableObject {
     }
 
     /// One pass. Nothing here touches the mouse or restarts an app:
-    /// - spots asked for in Arrange are saved as the icon's position (see `apply`);
+    /// - the order set in Arrange is saved as icon positions (see `plan`),
+    ///   once Arrange closes if the bar has to reset;
     /// - what fits is settled by moving Perch's own divider, which is instant.
     private func arrange() async {
         guard !isArranging else {
@@ -201,13 +264,32 @@ final class LayoutEngine: ObservableObject {
         }
 
         var current = await scan()
-        if !placements.isEmpty || perchPlacement != nil {
-            let requests = placements
-            let perchRequest = perchPlacement
-            placements.removeAll()
-            perchPlacement = nil
-            await apply(requests, perch: perchRequest, in: current)
-            current = await scan()
+        if let order = queued {
+            if let plan = plan(order, in: current) {
+                if plan.writes.isEmpty {
+                    // Only the divider and Perch's own items move: right away.
+                    if let position = plan.perch {
+                        menuBar.movePerch(to: position)
+                        await menuBar.settle()
+                        current = await scan()
+                    }
+                    setPriorities(order, in: current)
+                    queued = nil
+                } else if holdsMoves {
+                    log.notice("\(plan.writes.count, privacy: .public) icons move when Arrange closes")
+                    waitsForClose = true
+                    // The divider waits too: it goes by the order you set.
+                    return
+                } else {
+                    await commit(plan, order, in: current)
+                    queued = nil
+                    current = await scan()
+                }
+            } else {
+                log.notice("the order from Arrange no longer fits the bar")
+                queued = nil
+            }
+            waitsForClose = false
         }
         if placeDivider(in: current) {
             await menuBar.settle()
@@ -334,10 +416,13 @@ final class LayoutEngine: ObservableObject {
         }
     }
 
-    /// Puts `key` just before `anchor` in Perch's bar (at the end for anything else).
-    private func setHiddenOrder(_ key: String, before anchor: Anchor) {
-        var order = inHiddenOrder(items.filter { $0.isInMenuBar && $0.key != key && preferences.priority(for: $0.key) == .hidden })
-            .map(\.key)
+    /// Puts `key` just before `anchor` in Perch's bar (at the end for anything
+    /// else), among the icons not in `shown`.
+    private func setHiddenOrder(_ key: String, before anchor: Anchor, shown: [Spot]) {
+        let showing = Set(shown)
+        var order = inHiddenOrder(items.filter {
+            $0.isInMenuBar && $0.isMovable && $0.key != key && !showing.contains(.icon($0.key))
+        }).map(\.key)
         if case .icon(let next) = anchor, let index = order.firstIndex(of: next) {
             order.insert(key, at: index)
         } else {
@@ -346,273 +431,182 @@ final class LayoutEngine: ObservableObject {
         preferences.hiddenOrder = order
     }
 
-    /// An icon given a new saved spot, to check once Control Center has restarted.
-    private struct Move {
-        let key: String
-        let shown: Bool
-        /// What should end up just right of it (for an icon that's showing).
-        let neighbor: Entry.Kind?
-        let waiting: PendingMove?
+    /// New saved spots that put the bar in an order, and where Perch's item goes.
+    private struct Plan {
+        var writes: [(slot: StatusItemPositions.Slot, value: Double, name: String)] = []
+        var perch: Double?
     }
 
-    /// Saves each icon's new spot. Moves that only need the divider happen
-    /// without anything else. For the rest, Perch restarts Control Center:
-    /// on macOS 26 it draws every app's icons and puts each at its saved spot
-    /// when it starts, so they move right away without their apps restarting.
-    /// It has no windows; Apple's icons blink for a moment. An icon that
-    /// still isn't in its spot moves the next time its app opens.
-    private func apply(_ requests: [String: Placement], perch perchRequest: Placement?, in items: [MenuBarItem]) async {
+    /// The new spots that make the bar: hidden icons, then `order`, then the
+    /// clock and Control Center. Nil if that can't be done.
+    ///
+    /// Icons Perch can't move (a sandboxed app's, whose settings macOS guards)
+    /// stay put, and so do as many others as possible: the longest run that's
+    /// already in order. Everything else gets a spot between the two that stay
+    /// on either side of it. A spot Perch can't read is somewhere between its
+    /// neighbors' spots, so next to one the new spots hug the known side.
+    private func plan(_ order: [Spot], in items: [MenuBarItem]) -> Plan? {
         let list = entries(for: items)
-        var moves: [Move] = []
-        var writes: [(slot: StatusItemPositions.Slot, value: Double, name: String)] = []
-        notice = nil
+        let byKey = Dictionary(items.map { ($0.key, $0) }, uniquingKeysWith: { first, _ in first })
+        var index: [Spot: Int] = [:]
+        for (i, entry) in list.enumerated() {
+            switch entry.kind {
+            case .icon(let key): index[.icon(key)] = i
+            case .perch: index[.perch] = i
+            case .fixed: break
+            }
+        }
+        let shown = Set(order)
+        let hidden = list.indices.filter { i in
+            guard case .icon(let key) = list[i].kind else { return false }
+            return byKey[key]?.isMovable == true && !shown.contains(.icon(key))
+        }
+        // Indices into `list`, in the order they should end up.
+        let sequence = hidden + order.compactMap { index[$0] } + list.indices.filter { list[$0].kind == .fixed }
 
-        for (key, placement) in requests {
-            guard case .before(let anchor, let shown) = placement,
-                  let item = items.first(where: { $0.key == key }), item.isMovable,
-                  let index = list.firstIndex(where: { $0.kind == .icon(key) })
-            else {
-                log.notice("can't save a spot for \(key, privacy: .public)")
-                continue
+        func movable(_ i: Int) -> Bool {
+            switch list[i].kind {
+            case .perch: return true
+            case .fixed: return false
+            case .icon(let key): return slots[key].map { !$0.isPrivate } ?? false
             }
-            let instant = shown ? showsInPlace(at: index, isShown: item.section != .hidden, before: anchor, in: list)
-                                : hidesInPlace(at: index, in: list)
-            let others = list.filter { $0.kind != .icon(key) }
-            let neighbor = anchorIndex(anchor, in: others).map { others[$0].kind }
+        }
+        func known(_ i: Int) -> Double? { list[i].isGuess ? nil : list[i].position }
 
-            // An app whose settings Perch can't change (a sandboxed app keeps
-            // them where macOS asks the user before every change): leave its
-            // icon where it is and move the icons around it instead.
-            guard let slot = slots[key], !slot.isPrivate else {
-                if instant {
-                    log.notice("\(item.displayName, privacy: .public): only the divider moves")
-                    continue
-                }
-                guard let around = movesAround(key, shown: shown, anchor: anchor, in: list) else {
-                    log.notice("can't move the icons around \(item.displayName, privacy: .public)")
-                    preferences.setPriority(shown ? .hidden : .shown, for: key)
-                    notice = "Perch can't move \(item.displayName) there. ⌘-drag it in the menu bar instead."
-                    continue
-                }
-                log.notice("moving \(around.count, privacy: .public) icons around \(item.displayName, privacy: .public)")
-                writes += around
-                moves.append(Move(key: key, shown: shown, neighbor: neighbor, waiting: nil))
-                continue
+        // The longest run already in order that keeps every icon Perch can't move.
+        let weights = sequence.map { i -> Int? in movable(i) ? (known(i) == nil ? nil : 1) : 1000 }
+        var best = [Int](repeating: 0, count: sequence.count)
+        var previous = [Int?](repeating: nil, count: sequence.count)
+        for s in sequence.indices {
+            guard let weight = weights[s] else { continue }
+            best[s] = weight
+            for t in 0..<s where weights[t] != nil && sequence[t] < sequence[s] && best[t] + weight > best[s] {
+                best[s] = best[t] + weight
+                previous[s] = t
             }
-
-            let previous = pendingMoves[key].map(\.previous) ?? slot.value
-            let target: Double?
-            if instant {
-                // The divider does it. Only an earlier move still waiting needs undoing.
-                guard let waiting = pendingMoves[key] else {
-                    log.notice("\(item.displayName, privacy: .public): only the divider moves")
-                    continue
-                }
-                pendingMoves[key] = nil
-                target = waiting.previous ?? list[index].position
-            } else if shown {
-                target = position(for: placement, moving: .icon(key), in: items)
-            } else {
-                target = positionJustHidden(key, in: list)
-            }
-            guard let target else {
-                log.notice("can't save a spot for \(item.displayName, privacy: .public)")
-                continue
-            }
-            if let current = slot.value, abs(current - target) < 0.01 {
-                log.notice("\(item.displayName, privacy: .public) is already there")
-                continue
-            }
-            writes.append((slot, target, item.displayName))
-            guard !instant else { continue }
-            let app = NSRunningApplication(processIdentifier: item.pid)
-            moves.append(Move(
-                key: key, shown: shown, neighbor: neighbor,
-                waiting: app?.bundleIdentifier.map {
-                    PendingMove(bundleID: $0, name: app?.localizedName ?? item.displayName, hides: !shown, previous: previous)
-                }
-            ))
+        }
+        var stay: [Int] = []
+        var link = sequence.indices.max { best[$0] < best[$1] }.flatMap { best[$0] > 0 ? $0 : nil }
+        while let s = link {
+            stay.insert(s, at: 0)
+            link = previous[s]
+        }
+        let fixedCount = sequence.filter { !movable($0) }.count
+        guard stay.filter({ !movable(sequence[$0]) }).count == fixedCount else {
+            log.notice("icons Perch can't move would have to change order")
+            return nil
         }
 
-        for write in writes {
+        var result = Plan()
+        let largest = list.indices.compactMap(known).max() ?? 0
+        let ends: [Int?] = [nil] + stay.map { Optional($0) } + [nil]
+        for (a, b) in zip(ends, ends.dropFirst()) {
+            let movers = Array(sequence[(a.map { $0 + 1 } ?? 0)..<(b ?? sequence.count)])
+            guard !movers.isEmpty else { continue }
+            let left = a.map { sequence[$0] }, right = b.map { sequence[$0] }
+            // Known spots in the bar now between the two that stay.
+            let lo = left.map { $0 + 1 } ?? 0, hi = right ?? list.count
+            let inside = lo < hi ? list.indices[lo..<hi].filter { known($0) != nil } : []
+            var upper = left.flatMap { known($0) ?? inside.first.flatMap(known) }
+            var lower = right.flatMap { known($0) ?? inside.last.flatMap(known) }
+            let count = Double(movers.count)
+            switch (upper, lower) {
+            case let (u?, l?) where u > l:
+                break
+            case let (u?, l?):
+                if let left, known(left) == nil { upper = l + 0.05 }
+                else if let right, known(right) == nil { lower = u - 0.05 }
+                else { return nil }
+            case let (nil, l?):
+                upper = left == nil ? l + count + 1 : l + 0.05
+            case let (u?, nil):
+                lower = right == nil ? u - count - 1 : u - 0.05
+            case (nil, nil):
+                // Left of an icon whose spot nobody knows: well past every known spot.
+                guard left == nil else { return nil }
+                lower = largest + 1000
+                upper = largest + 1000 + count + 1
+            }
+            guard let u = upper, let l = lower else { return nil }
+            for (n, i) in movers.enumerated() {
+                let value = u - (u - l) * Double(n + 1) / (count + 1)
+                switch list[i].kind {
+                case .perch:
+                    result.perch = value
+                case .icon(let key):
+                    guard let slot = slots[key], !slot.isPrivate else { return nil }
+                    result.writes.append((slot, value, byKey[key]?.displayName ?? key))
+                case .fixed:
+                    return nil
+                }
+            }
+        }
+        return result
+    }
+
+    /// Saves the new spots and restarts Control Center once: on macOS 26 it
+    /// draws every app's icons and puts each at its saved spot when it starts,
+    /// so they move without their apps restarting. Then checks they landed.
+    private func commit(_ plan: Plan, _ order: [Spot], in items: [MenuBarItem]) async {
+        for write in plan.writes {
             if await StatusItemPositions.write(write.value, for: write.slot, within: 1) {
                 log.notice("saved a new spot for \(write.name, privacy: .public)")
             } else {
                 log.notice("couldn't save a spot for \(write.name, privacy: .public) in time")
             }
         }
-
-        if let perchRequest, let position = position(for: perchRequest, moving: .perch, in: items) {
-            menuBar.movePerch(to: position)
-        }
-        guard !moves.isEmpty else { return }
-
+        if let position = plan.perch { menuBar.movePerch(to: position) }
+        setPriorities(order, in: items)
         await AppRestarter.restartControlCenter()
         await menuBar.settle()
         let after = await settledScan()
-        // Control Center put every icon at its saved spot, including any
-        // earlier moves that were waiting.
-        let landed = entries(for: after)
-        var stillWaiting: [String: PendingMove] = [:]
-        var failed: [String] = []
-        for move in moves {
-            guard let index = landed.firstIndex(where: { $0.kind == .icon(move.key) }) else { continue }
-            let inPlace = move.shown
-                ? index + 1 < landed.count && landed[index + 1].kind == move.neighbor
-                : !landed[..<index].contains(where: blocksHiding)
-            guard !inPlace else { continue }
-            if let waiting = move.waiting {
-                stillWaiting[move.key] = waiting
-            } else {
-                failed.append(move.key)
-                // Don't leave it marked hidden in the middle of the shown icons.
-                if !move.shown { preferences.setPriority(.shown, for: move.key) }
-            }
+        // Control Center applied every saved spot, including older waiting ones.
+        if !pendingMoves.isEmpty { pendingMoves = [:] }
+        let wrong = misplaced(order, in: after)
+        for key in wrong where !order.contains(.icon(key)) {
+            // An icon marked hidden among the shown ones would take its neighbors along.
+            preferences.setPriority(.shown, for: key)
         }
-        if pendingMoves != stillWaiting { pendingMoves = stillWaiting }
-        if let first = failed.first, let name = after.first(where: { $0.key == first })?.displayName {
+        if let key = wrong.first {
+            let name = after.first { $0.key == key }?.displayName ?? key
             notice = "Perch couldn't move \(name) there. ⌘-drag it in the menu bar instead."
         }
-        log.notice("restarted Control Center: \(moves.count - stillWaiting.count - failed.count, privacy: .public) of \(moves.count, privacy: .public) icons moved")
+        log.notice("restarted Control Center: \(plan.writes.count, privacy: .public) spots saved, \(wrong.count, privacy: .public) icons out of place")
     }
 
-    /// Something to tell you in Arrange about the last move, if it didn't work.
-    @Published private(set) var notice: String?
+    /// Marks what's in `order` shown and the other movable icons hidden.
+    private func setPriorities(_ order: [Spot], in items: [MenuBarItem]) {
+        for item in items where item.isInMenuBar && item.isMovable {
+            let priority: IconPriority = order.contains(.icon(item.key)) ? .shown : .hidden
+            if preferences.priority(for: item.key) != priority { preferences.setPriority(priority, for: item.key) }
+        }
+    }
 
-    /// New spots for the icons around `key` that put it where you asked
-    /// without moving it. Its own position is unknown, so each spot hugs a
-    /// neighbor whose position Perch knows. Nil if that isn't possible (a
-    /// neighbor that has to move is private too, or Perch's own item is in the way).
-    private func movesAround(_ key: String, shown: Bool, anchor: Anchor,
-                             in list: [Entry]) -> [(slot: StatusItemPositions.Slot, value: Double, name: String)]? {
-        guard let index = list.firstIndex(where: { $0.kind == .icon(key) }) else { return nil }
-        var result: [(slot: StatusItemPositions.Slot, value: Double, name: String)] = []
-        let dividerX = menuBar.dividerFrame()?.maxX ?? -.infinity
-        func name(_ entry: Entry) -> String {
+    /// Icons that didn't end up where `order` says.
+    private func misplaced(_ order: [Spot], in items: [MenuBarItem]) -> [String] {
+        let list = entries(for: items)
+        let spots = list.map { entry -> Spot? in
             switch entry.kind {
-            case .icon(let other): return items.first { $0.key == other }?.displayName ?? other
-            case .perch: return "Perch"
-            case .fixed: return "the clock"
+            case .icon(let key): return .icon(key)
+            case .perch: return .perch
+            case .fixed: return nil
             }
         }
-        /// Saves new spots for `group`, left to right (falling values).
-        func save(_ group: [Entry], values: (Int) -> Double) -> Bool {
-            for (n, entry) in group.enumerated() {
-                guard case .icon(let other) = entry.kind, let slot = slots[other], !slot.isPrivate else {
-                    log.notice("can't move \(name(entry), privacy: .public) either")
-                    return false
-                }
-                result.append((slot, values(n), name(entry)))
-            }
-            return true
+        let shown = Set(order)
+        let landed = spots.compactMap { $0 }.filter(shown.contains)
+        let wanted = order.filter(landed.contains)
+        var result: [String] = []
+        for (want, got) in zip(wanted, landed) where want != got {
+            if case .icon(let key) = want { result.append(key) }
         }
-        /// Spots just inside the gap next to `edge`, within 0.05 of its position.
-        func hug(_ group: [Entry], _ edge: Entry, fromLeft: Bool) -> Bool {
-            guard !group.isEmpty else { return true }
-            guard !edge.isGuess, let value = edge.position else {
-                log.notice("\(name(edge), privacy: .public) has no known spot to move next to")
-                return false
-            }
-            let count = Double(group.count + 1)
-            return save(group) { n in
-                let step = 0.05 * Double(fromLeft ? n + 1 : group.count - n) / count
-                return fromLeft ? value - step : value + step
-            }
-        }
-        // Left of everything Perch knows: well past the largest known spot.
-        let farLeft = (list.compactMap { $0.isGuess ? nil : $0.position }.max() ?? 0) + 1000
-
-        if shown {
-            // Everything between it and where it's going moves to its left.
-            // Hidden icons go to the far left, where they stay hidden; the
-            // shown ones go just right of its left neighbor, so the divider
-            // can sit between the two.
-            let rest = list.filter { $0.kind != .icon(key) }
-            let target = anchor == .divider ? index : anchorIndex(anchor, in: rest)
-            guard let target, target >= index else {
-                log.notice("\(name(list[index]), privacy: .public) is right of where it's going")
-                return nil
-            }
-            let passing = Array(rest[index..<target])
-            let hidden = passing.filter { $0.x < dividerX }
-            let showing = passing.filter { $0.x >= dividerX }
-            guard save(hidden, values: { farLeft + Double(hidden.count - $0) }) else { return nil }
-            if index > 0 {
-                guard hug(showing, list[index - 1], fromLeft: true) else { return nil }
-            } else {
-                // Nothing on its left: the shown ones go far left too, right of the hidden ones.
-                guard save(showing, values: { farLeft - 500 + Double(showing.count - $0) }) else { return nil }
-            }
-        } else {
-            // The shown icons on its left move to its right, keeping their order.
-            let showing = list[..<index].filter(blocksHiding)
-            guard index + 1 < list.count else { return nil }
-            guard hug(showing, list[index + 1], fromLeft: false) else { return nil }
+        // Hidden ones must be left of everything that shows.
+        let firstShown = spots.firstIndex { $0.map(shown.contains) == true } ?? list.count
+        for (i, entry) in list.enumerated() where i > firstShown {
+            guard case .icon(let key) = entry.kind, !shown.contains(.icon(key)),
+                  items.first(where: { $0.key == key })?.isMovable == true else { continue }
+            result.append(key)
         }
         return result
-    }
-
-    /// Whether the icon at `index` hides with just the divider: no icon meant
-    /// to show is left of it. Goes by what you asked for, not what's on screen
-    /// now: an icon can be hidden today only because one next to it is, or
-    /// because there's no room, and moving the divider would take those along.
-    private func hidesInPlace(at index: Int, in list: [Entry]) -> Bool {
-        !list[..<index].contains(where: blocksHiding)
-    }
-
-    /// An icon left of one you're hiding that would be hidden along with it:
-    /// meant to show, and showing now. (One that's already hidden, like a
-    /// new app's icon macOS put at the far left, isn't in the way.)
-    private func blocksHiding(_ entry: Entry) -> Bool {
-        guard case .icon(let key) = entry.kind, entry.x > (menuBar.dividerFrame()?.maxX ?? -.infinity) else { return false }
-        return preferences.priority(for: key) == .shown && pendingMoves[key]?.hides != true
-    }
-
-    /// Whether the icon at `index` shows at `anchor` with just the divider: it's
-    /// already showing and you didn't pick a spot, or it's already next to the
-    /// anchor and nothing right of it stays hidden.
-    private func showsInPlace(at index: Int, isShown: Bool, before anchor: Anchor, in list: [Entry]) -> Bool {
-        if isShown && anchor == .divider { return true }
-        let others = list.filter { $0.kind != list[index].kind }
-        guard let anchorIndex = anchorIndex(anchor, in: others),
-              index < list.count - 1, list[index + 1].kind == others[anchorIndex].kind
-        else { return false }
-        return !list[(index + 1)...].contains { entry in
-            guard case .icon(let key) = entry.kind else { return false }
-            return preferences.priority(for: key) == .hidden && pendingMoves[key]?.hides != true
-        }
-    }
-
-    /// A spot left of every icon meant to show (and Perch's own item), so the
-    /// icon ends up hidden without taking any of them along. Where it sits
-    /// among the hidden icons doesn't matter: Perch's bar keeps its own order.
-    private func positionJustHidden(_ key: String, in list: [Entry]) -> Double? {
-        let others = list.filter { $0.kind != .icon(key) }
-        guard let first = others.firstIndex(where: { entry in
-            if case .icon = entry.kind { return blocksHiding(entry) }
-            return true // Perch's item, or the clock and Control Center
-        }) else { return nil }
-        return Self.between(first > 0 ? others[first - 1] : nil, others[first])
-    }
-
-    private func anchorIndex(_ anchor: Anchor, in list: [Entry]) -> Int? {
-        switch anchor {
-        case .icon(let key): return list.firstIndex { $0.kind == .icon(key) }
-        case .perch: return list.firstIndex { $0.kind == .perch }
-        case .end: return list.firstIndex { $0.kind == .fixed }
-        case .divider:
-            // The leftmost shown thing: the first entry right of the divider.
-            let dividerX = menuBar.dividerFrame()?.maxX ?? -.infinity
-            return list.firstIndex { $0.x > dividerX }
-        }
-    }
-
-    /// The saved position that puts `moving` just left of the placement's anchor.
-    private func position(for placement: Placement, moving: Entry.Kind, in items: [MenuBarItem]) -> Double? {
-        guard case .before(let anchor, _) = placement else { return nil }
-        let list = entries(for: items).filter { $0.kind != moving }
-        guard let index = anchorIndex(anchor, in: list) else { return nil }
-        return Self.between(index > 0 ? list[index - 1] : nil, list[index])
     }
 
     // MARK: What fits
