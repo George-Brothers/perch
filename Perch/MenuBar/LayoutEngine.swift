@@ -558,12 +558,13 @@ final class LayoutEngine: ObservableObject {
     /// close together for it to fit between them: save the bar's spots again,
     /// spread out, in the order it has now. That's one Control Center restart
     /// (after Arrange closes). What's hidden doesn't change.
-    private func respace(between left: Entry, and right: Entry, in items: [MenuBarItem]) {
+    /// True if it queued the spread-out spots.
+    private func respace(between left: Entry, and right: Entry, in items: [MenuBarItem]) -> Bool {
         let pair = "\(left.kind) \(right.kind)"
-        guard queued == nil, !MenuBarSpacing.isApplying else { return }
+        guard queued == nil, !MenuBarSpacing.isApplying else { return false }
         if let last = respaced[pair], Date().timeIntervalSince(last) < 600 {
             log.notice("saved spots are too close for the divider, and spreading them didn't help")
-            return
+            return false
         }
         let members = Set(items.filter { $0.isInMenuBar && $0.isMovable }.map(\.key))
         // Every icon Perch can place, left to right as they are now.
@@ -576,9 +577,10 @@ final class LayoutEngine: ObservableObject {
                 return .icon(key)
             }
         }
-        guard let plan = plan(order, in: items, members: members), !plan.writes.isEmpty else {
+        // Moving just Perch's item is fine too: that needs no restart.
+        guard let plan = plan(order, in: items, members: members), !plan.writes.isEmpty || plan.perch != nil else {
             log.notice("saved spots are too close for the divider, and Perch can't spread them")
-            return
+            return false
         }
         // Only worth a restart if the two end up far enough apart.
         func spot(_ entry: Entry) -> Double? {
@@ -590,7 +592,7 @@ final class LayoutEngine: ObservableObject {
         }
         guard let l = spot(left), let r = spot(right), l - r >= Self.minimumGap(near: l) else {
             log.notice("saved spots are too close for the divider, and spreading wouldn't help")
-            return
+            return false
         }
         log.notice("saved spots are too close for the divider; spreading \(plan.writes.count, privacy: .public) out")
         respaced[pair] = Date()
@@ -599,6 +601,7 @@ final class LayoutEngine: ObservableObject {
         queuedRevision += 1
         queued = order
         scheduleArrange(after: 0.02)
+        return true
     }
 
     /// The new spots that make the bar: hidden icons, then `order`, then the
@@ -669,14 +672,19 @@ final class LayoutEngine: ObservableObject {
         }
         // Where two that stay are too close together, or the ones going
         // between them would be, move one that stays too, so the run spreads out.
+        // Only one whose other neighbor that stays has a known spot (or is the
+        // end): next to a spot Perch can't read, it would just land in the same gap.
         var spreading = true
         while spreading {
             spreading = false
-            for (a, b) in zip(stay, stay.dropFirst()) {
+            for j in stay.indices.dropLast() {
+                let a = stay[j], b = stay[j + 1]
                 guard let u = known(sequence[a]), let l = known(sequence[b]),
                       (u - l) / Double(b - a) < Self.minimumGap(near: u) else { continue }
-                guard let drop = [b, a].first(where: { movable(sequence[$0]) }) else { continue }
-                stay.removeAll { $0 == drop }
+                let canDropB = movable(sequence[b]) && (j + 2 == stay.count || known(sequence[stay[j + 2]]) != nil)
+                let canDropA = movable(sequence[a]) && (j == 0 || known(sequence[stay[j - 1]]) != nil)
+                guard canDropB || canDropA else { continue }
+                stay.remove(at: canDropB ? j + 1 : j)
                 spreading = true
                 break
             }
@@ -969,8 +977,8 @@ final class LayoutEngine: ObservableObject {
         }
         if let left = leftOfCut, let right = rightOfCut, !left.isGuess, !right.isGuess,
            let l = left.position, let r = right.position, l - r < Self.minimumGap(near: l) {
-            respace(between: left, and: right, in: items)
-            return false
+            // Otherwise try anyway: there may still be a spot between them.
+            if respace(between: left, and: right, in: items) { return false }
         }
         guard let position = Self.between(leftOfCut, rightOfCut) else { return false }
         guard menuBar.moveDivider(to: position) else { return false }
