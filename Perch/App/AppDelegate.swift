@@ -24,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        let images = self.images
         let preferences = Preferences.shared
         let permissions = Permissions.shared
         let menuBar = MenuBarController(preferences: preferences)
@@ -33,7 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         settings = SettingsWindowController { navigation in
             AnyView(SettingsView(navigation: navigation, preferences: preferences,
-                                 permissions: permissions, engine: engine))
+                                 permissions: permissions, engine: engine, images: images))
         }
 
         arrangePanel = PanelController(model: engine) { [weak self] in
@@ -41,6 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 engine: engine,
                 preferences: preferences,
                 permissions: permissions,
+                images: images,
                 onOpenItem: { item in
                     self?.arrangePanel.close()
                     menuBar.open(item)
@@ -54,7 +56,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // The drawer shows pictures of hidden icons. macOS can only picture icons
         // that are on screen, so take them whenever the bar is showing everything.
-        let images = self.images
         let captureVisible: () async -> Void = {
             guard preferences.drawerEnabled, permissions.hasScreenRecording else { return }
             let items = await engine.rescan()
@@ -71,6 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 Task { await captureVisible() }
             }
             .store(in: &cancellables)
+        arrangePanel.onOpen = { Task { await captureVisible() } }
 
         let drawer = DrawerController(engine: engine, images: images, preferences: preferences)
         self.drawer = drawer
