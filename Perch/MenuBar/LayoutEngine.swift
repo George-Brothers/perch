@@ -609,14 +609,15 @@ final class LayoutEngine: ObservableObject {
     }
 
     /// `value`, or the nearest spot macOS can keep (32-bit) that's still
-    /// strictly between `l` and `r`: a hug that rounds onto a neighbor's spot
-    /// would tie with it.
-    private static func representable(_ value: Double, between l: Double, and r: Double) -> Double {
+    /// strictly between `l` and `r` (a hug that rounds onto a neighbor's spot
+    /// would tie with it). Nil if there's none.
+    private static func representable(_ value: Double, between l: Double, and r: Double) -> Double? {
         let f = Float(value), fl = Float(l), fr = Float(r)
         if f > fr && f < fl { return value }
         if f <= fr, fr.nextUp < fl { return Double(fr.nextUp) }
         if f >= fl, fl.nextDown > fr { return Double(fl.nextDown) }
-        return value
+        // Nothing fits between them; moving the divider couldn't land.
+        return nil
     }
 
     // MARK: Spots from Arrange
