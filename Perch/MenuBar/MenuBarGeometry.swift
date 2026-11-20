@@ -22,7 +22,7 @@ enum MenuBarGeometry {
     /// but are not menus.
     private static let ignoredOwners: Set<String> = ["Window Server", "Dock", "Notification Center"]
 
-    /// Perch's own panels (drawer, Arrange, search) sit at menu level but aren't menus.
+    /// Perch's own panels (drawer, Arrange) sit at menu level but aren't menus.
     @MainActor static var ignoredWindowNumbers: Set<Int> = []
 
     /// Whether an icon's frame starts on `screen` (any display when nil),

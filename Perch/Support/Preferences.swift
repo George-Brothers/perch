@@ -58,9 +58,6 @@ final class Preferences: ObservableObject {
         static let rehideDelay = "rehideDelay"
         static let rehideOnClickOutside = "rehideOnClickOutside"
         static let drawerEnabled = "drawerEnabled"
-        static let searchEnabled = "searchEnabled"
-        static let searchKeyCode = "searchKeyCode"
-        static let searchModifiers = "searchModifiers"
     }
 
     private let defaults: UserDefaults
@@ -87,21 +84,6 @@ final class Preferences: ObservableObject {
     @Published var drawerEnabled: Bool {
         didSet { defaults.set(drawerEnabled, forKey: Key.drawerEnabled) }
     }
-    /// A keyboard shortcut that finds and opens any menu bar icon.
-    @Published var searchEnabled: Bool {
-        didSet { defaults.set(searchEnabled, forKey: Key.searchEnabled) }
-    }
-    @Published var searchShortcut: Shortcut {
-        didSet {
-            defaults.set(Int(searchShortcut.keyCode), forKey: Key.searchKeyCode)
-            defaults.set(Int(searchShortcut.modifiers.rawValue), forKey: Key.searchModifiers)
-        }
-    }
-
-    /// Not saved: true while Settings is recording a new shortcut, so the old
-    /// one doesn't fire, and true when another app already owns the shortcut.
-    @Published var isRecordingShortcut = false
-    @Published var searchShortcutTaken = false
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -111,9 +93,6 @@ final class Preferences: ObservableObject {
             Key.rehideDelay: 15.0,
             Key.rehideOnClickOutside: true,
             Key.drawerEnabled: false,
-            Key.searchEnabled: true,
-            Key.searchKeyCode: Int(Shortcut.defaultSearch.keyCode),
-            Key.searchModifiers: Int(Shortcut.defaultSearch.modifiers.rawValue),
         ])
         iconStyle = PerchIconStyle(rawValue: defaults.string(forKey: Key.iconStyle) ?? "") ?? .bird
         let stored = defaults.dictionary(forKey: Key.priorities) as? [String: String] ?? [:]
@@ -122,11 +101,6 @@ final class Preferences: ObservableObject {
         rehideDelay = defaults.double(forKey: Key.rehideDelay)
         rehideOnClickOutside = defaults.bool(forKey: Key.rehideOnClickOutside)
         drawerEnabled = defaults.bool(forKey: Key.drawerEnabled)
-        searchEnabled = defaults.bool(forKey: Key.searchEnabled)
-        searchShortcut = Shortcut(
-            keyCode: UInt32(defaults.integer(forKey: Key.searchKeyCode)),
-            modifiers: NSEvent.ModifierFlags(rawValue: UInt(defaults.integer(forKey: Key.searchModifiers)))
-        )
     }
 
     func priority(for key: String) -> IconPriority {

@@ -52,9 +52,6 @@ final class MenuBarController: NSObject, ObservableObject {
     var toggleDrawer: (() -> Bool)?
     /// Runs once at launch while everything is still showing, before the first hide.
     var beforeFirstHide: (() async -> Void)?
-    var openSearch: (() -> Void)?
-    /// The search shortcut, shown in the right-click menu.
-    var searchShortcut: (() -> Shortcut?)?
     /// Whether the bird opens the drawer rather than showing icons in the bar.
     var usesDrawer: () -> Bool = { false }
 
@@ -121,10 +118,10 @@ final class MenuBarController: NSObject, ObservableObject {
     }
 
     /// True while the bar is out only for an icon opened from the drawer or
-    /// search, so Perch hides it again when that icon's menu closes.
+    /// Spotlight, so Perch hides it again when that icon's menu closes.
     private(set) var isTemporaryReveal = false
 
-    /// Opens a hidden icon picked from the drawer or search: shows the hidden icons just
+    /// Opens a hidden icon picked from the drawer or Spotlight: shows the hidden icons just
     /// long enough for its menu, then hides them again when the menu closes.
     /// Returns false when Perch is busy arranging and can't open it now.
     @discardableResult
@@ -269,7 +266,8 @@ final class MenuBarController: NSObject, ObservableObject {
         for key in ["NSStatusItem Preferred Position PerchArchivedDivider",
                     "NSStatusItem VisibleCC PerchArchivedDivider",
                     "NSStatusItem Visible PerchArchivedDivider",
-                    "archivedSectionEnabled", "clickAction", "hasSeenWelcome", "rehideOnAppSwitch"] {
+                    "archivedSectionEnabled", "clickAction", "hasSeenWelcome", "rehideOnAppSwitch",
+                    "searchEnabled", "searchKeyCode", "searchModifiers"] {
             defaults.removeObject(forKey: key)
         }
     }
@@ -387,13 +385,6 @@ final class MenuBarController: NSObject, ObservableObject {
         let menu = NSMenu()
         let toggleTitle = visibility.isRevealed ? "Hide Icons" : (usesDrawer() ? "Show Drawer" : "Show Hidden Icons")
         menu.addItem(withTitle: toggleTitle, action: #selector(menuToggle), keyEquivalent: "").target = self
-        let search = menu.addItem(withTitle: "Search Icons…", action: #selector(menuSearch), keyEquivalent: "")
-        search.target = self
-        if let shortcut = searchShortcut?(), let key = shortcut.keyEquivalent {
-            // Shown the way macOS menus show shortcuts.
-            search.keyEquivalent = key
-            search.keyEquivalentModifierMask = shortcut.modifiers
-        }
         menu.addItem(withTitle: "Arrange Icons…", action: #selector(menuArrange), keyEquivalent: "").target = self
         menu.addItem(.separator())
         menu.addItem(withTitle: "Settings…", action: #selector(menuSettings), keyEquivalent: ",").target = self
@@ -410,7 +401,6 @@ final class MenuBarController: NSObject, ObservableObject {
     @objc private func menuToggle() {
         if visibility.isRevealed || toggleDrawer?() != true { toggle() }
     }
-    @objc private func menuSearch() { openSearch?() }
     @objc private func menuArrange() { openArrange?(perchItem.button) }
     @objc private func menuSettings() { openSettings?(nil) }
     @objc private func menuQuit() { NSApp.terminate(nil) }
