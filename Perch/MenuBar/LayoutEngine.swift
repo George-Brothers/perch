@@ -598,10 +598,12 @@ final class LayoutEngine: ObservableObject {
         let right = rightEntry?.position
         switch (left, right) {
         case let (l?, r?) where leftEntry?.isGuess == true && rightEntry?.isGuess != true:
-            return representable(r + min(0.05, (l - r) / 16), between: l, and: r)
+            return representable(r + min(0.05, (l - r) / 16), between: l, and: r, leftIsGuess: true)
         case let (l?, r?) where rightEntry?.isGuess == true && leftEntry?.isGuess != true:
-            return representable(l - min(0.05, (l - r) / 16), between: l, and: r)
-        case let (l?, r?): return representable(r + min(1, (l - r) / 2), between: l, and: r)
+            return representable(l - min(0.05, (l - r) / 16), between: l, and: r, rightIsGuess: true)
+        case let (l?, r?):
+            return representable(r + min(1, (l - r) / 2), between: l, and: r,
+                                 leftIsGuess: leftEntry?.isGuess == true, rightIsGuess: rightEntry?.isGuess == true)
         case let (nil, r?): return r + 1
         case let (l?, nil): return l - 1
         default: return nil
@@ -610,14 +612,18 @@ final class LayoutEngine: ObservableObject {
 
     /// `value`, or the nearest spot macOS can keep (32-bit) that's still
     /// strictly between `l` and `r` (a hug that rounds onto a neighbor's spot
-    /// would tie with it). Nil if there's none.
-    private static func representable(_ value: Double, between l: Double, and r: Double) -> Double? {
-        let f = Float(value), fl = Float(l), fr = Float(r)
-        if f > fr && f < fl { return value }
-        if f <= fr, fr.nextUp < fl { return Double(fr.nextUp) }
-        if f >= fl, fl.nextDown > fr { return Double(fl.nextDown) }
-        // Nothing fits between them; moving the divider couldn't land.
-        return nil
+    /// would tie with it). A guessed neighbor's spot is only an estimate, so
+    /// that side is checked against it as is. Nil if there's none.
+    private static func representable(_ value: Double, between l: Double, and r: Double,
+                                      leftIsGuess: Bool = false, rightIsGuess: Bool = false) -> Double? {
+        let fl = Float(l), fr = Float(r)
+        func fits(_ c: Float) -> Bool {
+            (rightIsGuess ? Double(c) > r : c > fr) && (leftIsGuess ? Double(c) < l : c < fl)
+        }
+        if fits(Float(value)) { return value }
+        // The nearest that does; none means moving the divider couldn't land.
+        return [fr.nextUp, fl.nextDown].filter(fits).min { abs(Double($0) - value) < abs(Double($1) - value) }
+            .map(Double.init)
     }
 
     // MARK: Spots from Arrange
