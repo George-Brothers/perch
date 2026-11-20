@@ -336,6 +336,8 @@ final class LayoutEngine: ObservableObject {
         } else {
             log.notice("a menu stayed open; skipping this pass")
             deferrals = 0
+            // A respace is worked out again on the next pass; don't leave it waiting.
+            if respacing { queued = nil }
         }
     }
 
@@ -352,7 +354,8 @@ final class LayoutEngine: ObservableObject {
         }
         // While the screen is locked the bar isn't drawn; try again later.
         if AppRestarter.screenIsLocked {
-            if queued != nil && !respacing { scheduleArrange(after: 5) }
+            if respacing { queued = nil }
+            if queued != nil { scheduleArrange(after: 5) }
             return false
         }
         // Recreating the divider would close an open menu; wait for it.
@@ -388,11 +391,12 @@ final class LayoutEngine: ObservableObject {
             // Icons that stay put and you didn't place keep their priority (judged
             // now, before a restart can move them).
             let leaving = Set(current.filter { staysPut($0) }.map(\.key)).subtracting(queuedPlaced)
-            if isRespace, let pair { respaced[pair] = Date() }
+            func ran() { if isRespace, let pair { respaced[pair] = Date() } }
             func done() { if queuedRevision == revision { queued = nil } }
             if let plan = plan(order, in: current, members: members) {
                 if plan.writes.isEmpty {
                     // Only the divider and Perch's own items move: right away.
+                    ran()
                     let before = current
                     if let position = plan.perch {
                         menuBar.movePerch(to: position)
@@ -410,6 +414,7 @@ final class LayoutEngine: ObservableObject {
                     return true
                 } else {
                     waitsForClose = false
+                    ran()
                     await commit(plan, order, members: members, keepsPriorities: isRespace, leaving: leaving, in: current)
                     done()
                     current = await scan()
