@@ -35,7 +35,7 @@ struct SectionsPane: View {
                 InstructionRow(number: 2, text: "Hold ⌘ and drag each icon you always want to see to the right of the │ line.")
                 InstructionRow(number: 3, text: "Click the bird again. Everything left of the line hides.")
                 if preferences.archivedSectionEnabled {
-                    InstructionRow(number: 4, text: "Icons left of the ┆ line are archived. Option-click the bird to see them too.")
+                    InstructionRow(number: 4, text: "Icons left of the ┆ line are archived. They only appear in the Perch panel.")
                 }
                 Text("Perch starts with every icon hidden and sits next to Control Center, so the notch can't cover it. New apps add their icons on the far left, so they start out hidden too.")
                     .font(.callout)
@@ -46,7 +46,7 @@ struct SectionsPane: View {
                 Toggle(isOn: $preferences.archivedSectionEnabled) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Archived section")
-                        Text("For icons you rarely need. Adds a ┆ line beside the │ line. Icons left of it stay hidden until you Option-click the bird.")
+                        Text("For icons you rarely need. Adds a ┆ line beside the │ line. Icons left of it never show in the menu bar, only in the Perch panel.")
                             .font(.callout)
                             .foregroundStyle(.secondary)
                     }

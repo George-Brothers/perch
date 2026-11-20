@@ -8,6 +8,13 @@ xcodebuild -project Perch.xcodeproj -scheme Perch -configuration Release \
 
 rm -rf build/Perch.app
 cp -R build/DerivedData/Build/Products/Release/Perch.app build/
+
+# Sign with the local certificate if it exists (see scripts/make-signing-cert.sh),
+# so macOS keeps Perch's Accessibility permission across rebuilds.
+if security find-certificate -c "Perch Local Signing" >/dev/null 2>&1; then
+  codesign --force --deep --options runtime -s "Perch Local Signing" build/Perch.app 2>/dev/null
+  echo "Signed with Perch Local Signing"
+fi
 echo "Built build/Perch.app"
 
 if [[ "${1:-}" == "--install" ]]; then
