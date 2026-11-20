@@ -526,7 +526,7 @@ final class LayoutEngine: ObservableObject {
         guard let edge else { return false }
         var missed = false
         for (key, wantsLeft) in move.neighbors {
-            guard let item = items.first(where: { $0.key == key }), item.frame.width > 0 else { continue }
+            guard let item = items.first(where: { $0.key == key }), item.isInMenuBar, item.frame.width > 0 else { continue }
             let isLeft = item.frame.midX < edge
             var bounds = learnedBounds[key] ?? (nil, nil)
             if isLeft {
