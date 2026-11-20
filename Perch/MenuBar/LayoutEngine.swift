@@ -386,6 +386,7 @@ final class LayoutEngine: ObservableObject {
             let revision = queuedRevision
             // Read now: a drop while this runs clears the flag, but this batch is still a respace.
             let isRespace = respacing, pair = respacePair
+            let key = pair.map { "\($0.left) \($0.right)" }
             // A respace goes by the bar as it is now, which may have changed
             // while it waited; if nothing's crowded anymore, the plan moves nothing.
             if isRespace {
@@ -395,9 +396,13 @@ final class LayoutEngine: ObservableObject {
             // Icons that stay put and you didn't place keep their priority (judged
             // now, before a restart can move them).
             let leaving = Set(current.filter { staysPut($0) }.map(\.key)).subtracting(queuedPlaced)
-            func ran() { if isRespace, let pair { respaced[pair] = Date() } }
+            func ran() { if isRespace, let key { respaced[key] = Date() } }
             func done() { if queuedRevision == revision { queued = nil } }
-            if let plan = plan(order, in: current, members: members) {
+            if isRespace, let pair, !crowded(pair.left, pair.right, in: current) {
+                // It waited (for Arrange to close, say) and the bar changed: no restart.
+                log.notice("the saved spots aren't crowded anymore; not spreading them")
+                done()
+            } else if let plan = plan(order, in: current, members: members, spreadAll: isRespace) {
                 if plan.writes.isEmpty {
                     // Only the divider and Perch's own items move: right away.
                     ran()
@@ -602,7 +607,17 @@ final class LayoutEngine: ObservableObject {
     /// one that spreading didn't help doesn't restart Control Center over and over.
     private var respaced: [String: Date] = [:]
     /// The pair a queued respace is for.
-    private var respacePair: String?
+    private var respacePair: (left: Entry.Kind, right: Entry.Kind)?
+
+    /// The two are still next to each other in the bar, with known spots too
+    /// close together for the divider to fit between.
+    private func crowded(_ left: Entry.Kind, _ right: Entry.Kind, in items: [MenuBarItem]) -> Bool {
+        let list = entries(for: items)
+        guard let i = list.firstIndex(where: { $0.kind == left }), i + 1 < list.count else { return false }
+        let a = list[i], b = list[i + 1]
+        guard b.kind == right, !a.isGuess, !b.isGuess, let l = a.position, let r = b.position else { return false }
+        return l - r < Self.minimumGap(near: l)
+    }
 
     /// The icons on either side of where the divider has to go are saved too
     /// close together for it to fit between them: save the bar's spots again,
@@ -619,7 +634,7 @@ final class LayoutEngine: ObservableObject {
         let members = Set(items.filter { $0.isInMenuBar && $0.isMovable }.map(\.key))
         let order = respaceOrder(in: items)
         // Moving just Perch's item is fine too: that needs no restart.
-        guard let plan = plan(order, in: items, members: members), !plan.writes.isEmpty || plan.perch != nil else {
+        guard let plan = plan(order, in: items, members: members, spreadAll: true), !plan.writes.isEmpty || plan.perch != nil else {
             log.notice("saved spots are too close for the divider, and Perch can't spread them")
             return false
         }
@@ -636,7 +651,7 @@ final class LayoutEngine: ObservableObject {
             return false
         }
         log.notice("saved spots are too close for the divider; spreading \(plan.writes.count, privacy: .public) out")
-        respacePair = pair
+        respacePair = (left.kind, right.kind)
         respacing = true
         queuedPlaced = []
         queuedFrom = members
@@ -654,7 +669,10 @@ final class LayoutEngine: ObservableObject {
     /// already in order. Everything else gets a spot between the two that stay
     /// on either side of it. A spot Perch can't read is somewhere between its
     /// neighbors' spots, so next to one the new spots hug the known side.
-    private func plan(_ order: [Spot], in items: [MenuBarItem], members: Set<String>? = nil) -> Plan? {
+    /// `spreadAll` also spreads two that stay side by side with nothing going
+    /// between them; only a respace wants that, since it's a restart for icons that don't move.
+    private func plan(_ order: [Spot], in items: [MenuBarItem], members: Set<String>? = nil,
+                      spreadAll: Bool = false) -> Plan? {
         let members = members ?? queuedFrom
         let list = entries(for: items)
         let byKey = Dictionary(items.map { ($0.key, $0) }, uniquingKeysWith: { first, _ in first })
@@ -721,7 +739,7 @@ final class LayoutEngine: ObservableObject {
             spreading = false
             for j in stay.indices.dropLast() {
                 let a = stay[j], b = stay[j + 1]
-                guard let u = known(sequence[a]), let l = known(sequence[b]),
+                guard spreadAll || b - a > 1, let u = known(sequence[a]), let l = known(sequence[b]),
                       (u - l) / Double(b - a) < Self.minimumGap(near: u) else { continue }
                 let canDropB = movable(sequence[b]) && (j + 2 == stay.count || known(sequence[stay[j + 2]]) != nil)
                 let canDropA = movable(sequence[a]) && (j == 0 || known(sequence[stay[j - 1]]) != nil)
