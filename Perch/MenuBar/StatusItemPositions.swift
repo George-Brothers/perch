@@ -217,8 +217,7 @@ enum AppRestarter {
             // a menu you opened meanwhile (menus close soon; check twice a second).
             if screenIsLocked {
                 log.notice("restart waiting for the screen to unlock")
-                _ = await DistributedNotificationCenter.default()
-                    .notifications(named: .init("com.apple.screenIsUnlocked")).first { _ in true }
+                await waitForUnlock()
                 continue
             }
             if MenuBarGeometry.isMenuOpen() {
@@ -244,6 +243,35 @@ enum AppRestarter {
             try? await Task.sleep(for: .milliseconds(50))
         }
         try? await Task.sleep(for: .milliseconds(300))
+    }
+
+    /// Waits for the screen to unlock; returns at once if it isn't locked.
+    static func waitForUnlock() async {
+        // Listen before looking, so an unlock in between isn't missed. A slow
+        // check once a minute covers a notice that never comes.
+        let center = DistributedNotificationCenter.default()
+        let wakes = AsyncStream<Void> { continuation in
+            let observer = center.addObserver(forName: .init("com.apple.screenIsUnlocked"), object: nil,
+                                              queue: nil) { _ in continuation.yield() }
+            let ticker = Task {
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(60))
+                    continuation.yield()
+                }
+            }
+            continuation.onTermination = { _ in
+                center.removeObserver(observer)
+                ticker.cancel()
+            }
+        }
+        guard screenIsLocked else { return }
+        for await _ in wakes {
+            // The lock flag can lag the notice by a moment.
+            for _ in 0..<6 where screenIsLocked {
+                try? await Task.sleep(for: .milliseconds(500))
+            }
+            if !screenIsLocked { return }
+        }
     }
 
     /// Whether the login window is covering the screen.

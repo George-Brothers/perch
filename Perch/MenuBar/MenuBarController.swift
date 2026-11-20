@@ -603,8 +603,7 @@ final class MenuBarController: NSObject, ObservableObject {
             guard hasAccessibility else { return }
             if AppRestarter.screenIsLocked {
                 // Nothing to look at until it's unlocked; don't check every second all night.
-                _ = await DistributedNotificationCenter.default()
-                    .notifications(named: .init("com.apple.screenIsUnlocked")).first { _ in true }
+                await AppRestarter.waitForUnlock()
             } else {
                 try? await Task.sleep(for: .seconds(1))
             }

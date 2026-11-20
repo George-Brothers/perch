@@ -87,7 +87,8 @@ enum MenuMirror {
             return .panel
         case .nothing:
             log.notice("\(item.displayName, privacy: .public) opened nothing Perch could show")
-            return .failed
+            // Closed meanwhile: don't fall back to revealing the menu bar.
+            return stillWanted() ? .failed : .dismissed
         }
     }
 
@@ -112,7 +113,8 @@ enum MenuMirror {
             // A panel that just opened off screen: bring it under Perch's bar.
             for window in AX.elements(app, kAXWindowsAttribute) where !windowsBefore.contains(CFHash(window)) {
                 guard let frame = AX.frame(of: window), !screens.contains(where: { $0.intersects(frame) }) else { continue }
-                let screen = screens.first { $0.minX <= panelOrigin.x && panelOrigin.x < $0.maxX } ?? screens.first ?? .zero
+                let screen = screens.first { $0.contains(panelOrigin) }
+                    ?? screens.first { $0.minX <= panelOrigin.x && panelOrigin.x < $0.maxX } ?? screens.first ?? .zero
                 var origin = CGPoint(x: min(panelOrigin.x, screen.maxX - frame.width - 8), y: panelOrigin.y)
                 origin.x = max(origin.x, screen.minX + 8)
                 if let value = AXValueCreate(.cgPoint, &origin),
@@ -127,7 +129,7 @@ enum MenuMirror {
 
     private nonisolated static func read(_ menu: AXUIElement, path: [Int], titles: [String], levels: [[String]]) -> [Entry] {
         let children = AX.elements(menu, kAXChildrenAttribute)
-        let levels = levels + [children.map(signature)]
+        let levels = levels + [children.map(markedSignature)]
         return children.enumerated().map { index, element in
             let title = AX.string(element, kAXTitleAttribute) ?? ""
             let enabled = AX.raw(element, kAXEnabledAttribute) as? Bool ?? true
@@ -220,6 +222,18 @@ enum MenuMirror {
         return "\(title)\u{1F}\(key)\u{1F}\(key.isEmpty ? 0 : modifiers)"
     }
 
+    /// The same plus the checkmark, for telling twins apart: if two
+    /// "Disconnect" rows swapped, only their checkmarks show it.
+    private nonisolated static func markedSignature(_ element: AXUIElement) -> String {
+        let marked = !(AX.string(element, "AXMenuItemMarkChar") ?? "").isEmpty
+        return signature(element) + "\u{1F}" + (marked ? "1" : "0")
+    }
+
+    private nonisolated static func unmarked(_ signature: String) -> String {
+        guard let end = signature.lastIndex(of: "\u{1F}") else { return signature }
+        return String(signature[..<end])
+    }
+
     private nonisolated static func press(path: [Int], titles: [String], levels: [[String]], in element: AXUIElement) {
         AXUIElementSetMessagingTimeout(element, 0.3)
         _ = AXUIElementPerformAction(element, kAXPressAction as CFString)
@@ -241,14 +255,16 @@ enum MenuMirror {
             // isn't it). With no title, or twins, only if this menu is exactly
             // as copied. Never a guess.
             let title = depth < titles.count ? titles[depth] : ""
-            let copied = depth < levels.count ? levels[depth] : []
+            let copiedMarked = depth < levels.count ? levels[depth] : []
+            let copied = copiedMarked.map(unmarked)
             let picked = index < copied.count ? copied[index] : nil
-            let now = items.map(signature)
+            let nowMarked = items.map(markedSignature)
+            let now = nowMarked.map(unmarked)
             let matches = items.indices.filter { now[$0] == picked }
             var found: AXUIElement?
             if !title.isEmpty, let picked, matches.count == 1, copied.filter({ $0 == picked }).count == 1 {
                 found = items[matches[0]]
-            } else if now == copied, index < items.count {
+            } else if nowMarked == copiedMarked, index < items.count {
                 found = items[index]
             }
             guard let next = found else { break }

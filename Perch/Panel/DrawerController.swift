@@ -15,7 +15,8 @@ final class DrawerController {
     private var keyMonitor: Any?
     private var resizeObserver: NSObjectProtocol?
     /// Bumped on every open, so a fade-out that finishes late doesn't hide a reopened drawer.
-    private var generation = 0
+    /// Counts openings, so a click from an earlier opening can tell it's stale.
+    private(set) var generation = 0
 
     /// Opens the icon's own menu with its top-left corner at the point, and
     /// returns once it's done: true if Perch's bar should close too (you picked
@@ -191,7 +192,7 @@ struct DrawerView: View {
     @State private var iconsWidth: CGFloat = 0
 
     var body: some View {
-        let room = (NSScreen.main?.visibleFrame.width ?? 1400) - 24
+        let room = engine.barScreenWidth - 24
         Group {
             if iconsWidth > room {
                 // Starts at the right end, nearest the menu bar's own icons.
@@ -236,14 +237,14 @@ struct DrawerView: View {
     private func priorityMenu(for item: MenuBarItem) -> some View {
         Text(item.displayName)
         Divider()
-        if preferences.priority(for: item.key) == .hidden {
+        if engine.isWaitingForRoom(item) {
+            // Already set to show; it's here because the menu bar is full.
+            Text("No room in the menu bar")
+        } else {
             Button("Show in Menu Bar") {
                 onClose()
                 engine.place(item, .before(.divider, shown: true))
             }
-        } else {
-            // Already set to show; it's here because the menu bar is full.
-            Text("No room in the menu bar")
         }
         Divider()
         Button("Arrange Icons…", action: onArrange)

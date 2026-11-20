@@ -271,8 +271,13 @@ struct ArrangeBar: View {
             }
             .onEnded { value in
                 // Let go well away from the strip: you changed your mind.
+                // A scrolled strip is wider than what's showing, so also check the window.
                 let p = value.location
-                guard p.y > -height, p.y < height * 2, p.x > -40, p.x < stripWidth + 40 else {
+                let mouse = NSEvent.mouseLocation
+                let inWindow = NSApp.windows.contains {
+                    $0.isVisible && $0.frame.insetBy(dx: -40, dy: -height).contains(mouse)
+                }
+                guard inWindow, p.y > -height, p.y < height * 2, p.x > -40, p.x < stripWidth + 40 else {
                     arrangeLog.debug("dropped outside Arrange; nothing moves")
                     return
                 }
@@ -443,7 +448,7 @@ struct ArrangeBar: View {
     /// Why an icon is drawn faded: it isn't where its side says yet.
     private func waitingNote(for item: MenuBarItem, in row: Row) -> String? {
         if engine.hasQueuedMoves { return nil }
-        return row == .bar && item.section == .hidden ? "no room right now" : nil
+        return row == .bar && engine.isWaitingForRoom(item) ? "no room right now" : nil
     }
 
     private func item(_ key: String) -> MenuBarItem? {
@@ -597,7 +602,7 @@ struct OverBarGeometry: Equatable {
 struct ArrangePanelView: View {
     @ObservedObject var engine: LayoutEngine
     @ObservedObject var preferences: Preferences
-    let permissions: Permissions
+    @ObservedObject var permissions: Permissions
     let images: IconImages
     /// Where the menu bar is, for Arrange over it. Read each time it draws.
     let overBar: () -> OverBarGeometry?
@@ -636,17 +641,28 @@ struct ArrangePanelView: View {
     }
 
     /// One dark bar under the menu bar: the gear, then the strip.
-    private var below: some View {
-        // With a lot of icons the strip can be wider than the screen: then it
-        // scrolls, starting at the right end, and the gear stays put.
-        let room = (NSScreen.main?.visibleFrame.width ?? 1400) - 80
-        return HStack(alignment: .top, spacing: 2) {
+    private var below: some View { below(room: engine.barScreenWidth - 80) }
+
+    /// With a lot of icons the strip can be wider than `room`: then it
+    /// scrolls, starting at the right end, and the gear and notes stay put.
+    private func below(room: CGFloat) -> some View {
+        HStack(alignment: .top, spacing: 2) {
             SettingsGear(action: onOpenSettings)
                 .frame(height: 32)
             if stripWidth > room {
-                ScrollView(.horizontal, showsIndicators: false) { strip() }
-                    .defaultScrollAnchor(.trailing)
-                    .frame(width: room)
+                VStack(alignment: .leading, spacing: 6) {
+                    ScrollView(.horizontal, showsIndicators: false) { strip(notes: false) }
+                        .defaultScrollAnchor(.trailing)
+                        .frame(width: room)
+                    if let note = ArrangeNotes.text(engine) {
+                        Text(note)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(width: room - 12, alignment: .leading)
+                            .padding(.horizontal, 6)
+                    }
+                }
             } else {
                 strip()
             }
@@ -680,7 +696,8 @@ struct ArrangePanelView: View {
                     .frame(width: geometry.bandEnd, alignment: .trailing)
             } else {
                 Color.clear.frame(height: geometry.barHeight)
-                below
+                // Right-aligned to the band's end, so it must fit left of it.
+                below(room: min(engine.barScreenWidth, geometry.bandEnd) - 80)
                     .frame(width: geometry.bandEnd, alignment: .trailing)
             }
         }

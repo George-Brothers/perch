@@ -22,6 +22,8 @@ final class IconImages: ObservableObject {
     /// between Light and Dark, shown icons are retaken but hidden ones keep
     /// their old pictures, so one answer can't fit both.
     private var lightness: [String: Bool] = [:]
+    /// Which Light/Dark period each picture was taken in (see `themeCount`).
+    private var takenIn: [String: Int] = [:]
 
     /// Whether this icon's picture is drawn light.
     func isLight(_ item: MenuBarItem) -> Bool { lightness[item.key] ?? iconsAreLight }
@@ -75,6 +77,7 @@ final class IconImages: ObservableObject {
         images = [:]
         captured = [:]
         lightness = [:]
+        takenIn = [:]
         iconsAreLight = false
     }
 
@@ -153,9 +156,12 @@ final class IconImages: ObservableObject {
         }
         // Judge from every picture, so one colorful new icon can't flip the look.
         iconsAreLight = Self.averageLuminance(of: Array(updated.values)) > 0.6
-        // A batch of a few is enough to judge on its own; one or two go by the rest.
-        let batchIsLight = pictures.count >= 3
-            ? Self.averageLuminance(of: pictures.map(\.1)) > 0.6 : iconsAreLight
+        // A batch of a few is enough to judge on its own; one or two go by the
+        // others taken in the same Light/Dark mode, if there are enough.
+        for (key, _) in pictures { takenIn[key] = theme }
+        let sameMode = updated.filter { takenIn[$0.key] == theme }.map(\.value)
+        let basis = pictures.count >= 3 || sameMode.count < 3 ? pictures.map(\.1) : sameMode
+        let batchIsLight = Self.averageLuminance(of: basis) > 0.6
         for (key, _) in pictures { lightness[key] = batchIsLight }
         images = updated
     }

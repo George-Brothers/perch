@@ -28,7 +28,6 @@ final class LayoutEngine: ObservableObject {
     private var arrangeAgain = false
     /// How many times in a row a pass waited for a menu or the mouse.
     private var deferrals = 0
-    /// The display layout at the last display-change trigger.
 
 
     init(preferences: Preferences, permissions: Permissions, menuBar: MenuBarController) {
@@ -196,6 +195,22 @@ final class LayoutEngine: ObservableObject {
     /// Rescans and returns the icons, for callers that need them right away.
     func rescan() async -> [MenuBarItem] {
         isArranging ? items : await scan()
+    }
+
+    /// True when an icon set to show is hidden only because the menu bar is
+    /// full. (One you hid that sits between it and the shown icons keeps it
+    /// hidden too, and that one Show in Menu Bar can fix.)
+    func isWaitingForRoom(_ item: MenuBarItem) -> Bool {
+        guard item.section == .hidden, preferences.priority(for: item.key) == .shown else { return false }
+        return !items.contains {
+            $0.section == .hidden && $0.isMovable && $0.frame.minX > item.frame.minX
+                && preferences.priority(for: $0.key) == .hidden
+        }
+    }
+
+    /// How wide the screen with Perch's menu bar is, so its strips can fit it.
+    var barScreenWidth: CGFloat {
+        (menuBar.screen ?? NSScreen.main)?.visibleFrame.width ?? 1400
     }
 
     /// Moves asked for in Arrange that no pass has picked up yet.
@@ -679,6 +694,8 @@ final class LayoutEngine: ObservableObject {
         // every icon went missing and undo a move that worked. Leave it.
         guard permissions.hasAccessibility else {
             log.notice("Accessibility went away during a move; not checking it")
+            // The spots are applied; keep which side each icon is on, too.
+            setPriorities(order, in: items, members: members)
             return
         }
         let previous = Dictionary(uniqueKeysWithValues: members.map { ($0, preferences.priority(for: $0)) })
@@ -805,7 +822,13 @@ final class LayoutEngine: ObservableObject {
         // Room between the notch (or the middle of the screen, where app menus
         // can reach on screens without one) and the clock and Control Center.
         let leftBound = screen.auxiliaryTopRightArea?.minX ?? screen.frame.midX
-        let onScreen = { (item: MenuBarItem) in screen.frame.minX <= item.frame.minX && item.frame.minX < screen.frame.maxX }
+        // Icon frames are top-down from the main screen; check both directions
+        // so a display stacked above or below doesn't count.
+        let top = (NSScreen.screens.first?.frame.height ?? 0) - screen.frame.maxY
+        let onScreen = { (item: MenuBarItem) in
+            screen.frame.minX <= item.frame.minX && item.frame.minX < screen.frame.maxX
+                && item.frame.minY > top - 60 && item.frame.minY < top + screen.frame.height
+        }
         let rightBound = inBar.filter { $0.isFixed && onScreen($0) }.map(\.frame.minX).min() ?? screen.frame.maxX
         // Icons macOS places itself (the mic indicator) take room too.
         let reserved = inBar
@@ -940,7 +963,11 @@ final class LayoutEngine: ObservableObject {
         // Background-only helpers can't have icons; they're skipped.
         appsObservation = NSWorkspace.shared.observe(\.runningApplications, options: [.old, .new]) { [weak self] _, change in
             let changed = (change.newValue ?? []) + (change.oldValue ?? [])
-            guard changed.contains(where: { $0.activationPolicy != .prohibited }) else { return }
+            // Control Center restarting is Perch's own doing; XPC helpers have no icons.
+            guard changed.contains(where: {
+                $0.activationPolicy != .prohibited && $0.bundleIdentifier != "com.apple.controlcenter"
+                    && !($0.bundleURL?.path.contains(".xpc/") ?? false)
+            }) else { return }
             DispatchQueue.main.async {
                 MainActor.assumeIsolated { self?.scheduleArrange(after: 3) }
             }

@@ -287,10 +287,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// close: after you pick something, or if the icon had to come out into
     /// the menu bar. Closing its menu without picking leaves the bar open.
     private func openFromBar(_ item: MenuBarItem, at point: NSPoint) async -> Bool {
-        switch await MenuMirror.open(item, at: point, stillWanted: { [weak self] in self?.drawer.isOpen == true }) {
+        // Wanted only while this opening of Perch's bar lasts.
+        let opening = drawer.generation
+        let stillWanted = { [weak self] in self?.drawer.isOpen == true && self?.drawer.generation == opening }
+        switch await MenuMirror.open(item, at: point, stillWanted: stillWanted) {
         case .picked: return true
         case .dismissed, .panel: return false
         case .failed:
+            guard stillWanted() else { return false }
             menuBar.openTemporarily(item)
             return true
         }
@@ -318,6 +322,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
+    private var isQuitting = false
+
     /// When Spotlight last opened an icon, so the reopen that comes with it
     /// doesn't also show Settings.
     private var openedFromSpotlight: Date?
@@ -326,12 +332,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// new spots are already saved, and quitting midway would leave them for
     /// the next restart to apply unchecked. Closing Arrange lets held moves go.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard engine != nil else { return .terminateNow }
+        guard engine != nil, !isQuitting else { return .terminateNow }
         arrangePanel.close()
-        guard engine.isArranging || engine.hasQueuedMoves else { return .terminateNow }
+        // Without Accessibility, held moves can't run; don't wait on them.
+        let canFinish = engine.isArranging || (engine.hasQueuedMoves && Permissions.shared.hasAccessibility)
+        guard canFinish else { return .terminateNow }
+        isQuitting = true
         Task { @MainActor in
-            for _ in 0..<125 where engine.isArranging || engine.hasQueuedMoves {
+            // Time spent locked doesn't count: the move is waiting for the unlock.
+            var waited = 0
+            while waited < 125, engine.isArranging || engine.hasQueuedMoves {
                 try? await Task.sleep(for: .milliseconds(200))
+                if !AppRestarter.screenIsLocked { waited += 1 }
             }
             sender.reply(toApplicationShouldTerminate: true)
         }
