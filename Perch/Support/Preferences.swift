@@ -76,6 +76,7 @@ final class Preferences: ObservableObject {
         static let barItem = "barItem"
         static let priorities = "iconPriorities"
         static let drawerEnabled = "drawerEnabled"
+        static let hiddenOrder = "hiddenOrder"
     }
 
     private let defaults: UserDefaults
@@ -99,6 +100,11 @@ final class Preferences: ObservableObject {
         didSet { defaults.set(drawerEnabled, forKey: Key.drawerEnabled) }
     }
 
+    /// The order of icons in Perch's bar, left to right, by `MenuBarItem.key`.
+    @Published var hiddenOrder: [String] {
+        didSet { defaults.set(hiddenOrder, forKey: Key.hiddenOrder) }
+    }
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         defaults.register(defaults: [
@@ -111,6 +117,7 @@ final class Preferences: ObservableObject {
         let stored = defaults.dictionary(forKey: Key.priorities) as? [String: String] ?? [:]
         priorities = stored.compactMapValues(IconPriority.init(stored:)).filter { $0.value == .hidden }
         drawerEnabled = defaults.bool(forKey: Key.drawerEnabled)
+        hiddenOrder = defaults.stringArray(forKey: Key.hiddenOrder) ?? []
     }
 
     func priority(for key: String) -> IconPriority {

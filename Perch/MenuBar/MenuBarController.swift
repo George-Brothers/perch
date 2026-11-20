@@ -350,30 +350,6 @@ final class MenuBarController: NSObject, ObservableObject {
         defaults.removeObject(forKey: "NSStatusItem VisibleCC \(name)")
     }
 
-    private var standIns: [String: NSStatusItem] = [:]
-
-    /// Holds an icon's spot open with a blank item while its app restarts,
-    /// so the icons next to it don't shift back and forth.
-    func holdSpot(for key: String, width: CGFloat, at position: Double) {
-        releaseSpot(for: key)
-        let name = "PerchStandIn\(standIns.count)"
-        Self.save(position, for: name)
-        let item = NSStatusBar.system.statusItem(withLength: width)
-        item.autosaveName = name
-        item.button?.setAccessibilityLabel("Perch placeholder")
-        standIns[key] = item
-    }
-
-    func releaseSpot(for key: String) {
-        guard let item = standIns.removeValue(forKey: key) else { return }
-        let name = item.autosaveName ?? ""
-        NSStatusBar.system.removeStatusItem(item)
-        let defaults = UserDefaults.standard
-        for prefix in ["NSStatusItem Preferred Position ", "NSStatusItem Visible ", "NSStatusItem VisibleCC "] {
-            defaults.removeObject(forKey: prefix + name)
-        }
-    }
-
     /// Earlier versions had an "Archived" divider. Remove its saved state.
     private func removeRetiredItems() {
         let defaults = UserDefaults.standard
@@ -480,6 +456,18 @@ final class MenuBarController: NSObject, ObservableObject {
         placementAttempts = 0
         // Always async, so `onReady` is wired up before it can fire.
         DispatchQueue.main.async { [weak self] in self?.waitForPlacement() }
+    }
+
+    /// Waits until the divider has its new frame after a move: a new status
+    /// item's frame is empty or stale for a moment.
+    func settle() async {
+        var last: NSRect?
+        for _ in 0..<20 {
+            try? await Task.sleep(for: .milliseconds(50))
+            let now = screenFrame(of: hiddenDivider)
+            if let now, now == last { return }
+            last = now
+        }
     }
 
     private func waitForPlacement() {

@@ -116,48 +116,20 @@ enum StatusItemPositions {
     }
 }
 
-/// Restarts apps so their icons pick up new positions.
+/// Restarts Control Center and macOS's other menu bar agents so Apple's icons
+/// pick up new positions. They have no windows and come straight back. Perch
+/// never restarts your apps.
 enum AppRestarter {
-    private static let log = Logger(subsystem: "com.georgebrothers.perch", category: "positions")
-
     /// Apps whose icons belong to a system process that macOS restarts by itself.
     static func isSystemAgent(_ bundleID: String) -> Bool {
         bundleID.hasPrefix("com.apple.")
     }
 
-    /// Whether restarting the app could interrupt you: it has a Dock icon and
-    /// windows. Those wait until the app restarts on its own.
-    static func isSafeToRestart(_ app: NSRunningApplication) -> Bool {
-        guard let bundleID = app.bundleIdentifier else { return false }
-        if isSystemAgent(bundleID) { return true }
-        return app.activationPolicy != .regular
-    }
-
-    /// Quits the app and opens it again in the background. Returns false if it wouldn't quit.
+    /// Quits a system agent; macOS starts it again by itself. False if it didn't quit.
     static func restart(_ app: NSRunningApplication) async -> Bool {
-        let bundleID = app.bundleIdentifier ?? ""
-        if isSystemAgent(bundleID) {
-            // Control Center and friends come straight back on their own.
-            kill(app.processIdentifier, SIGTERM)
-            return await waitUntilGone(app)
-        }
-        guard let url = app.bundleURL else { return false }
-        app.terminate()
-        guard await waitUntilGone(app) else {
-            log.notice("\(bundleID, privacy: .public) didn't quit; its icon will move when it next starts")
-            return false
-        }
-        let configuration = NSWorkspace.OpenConfiguration()
-        configuration.activates = false
-        configuration.addsToRecentItems = false
-        configuration.hides = true
-        do {
-            _ = try await NSWorkspace.shared.openApplication(at: url, configuration: configuration)
-            return true
-        } catch {
-            log.error("Couldn't reopen \(bundleID, privacy: .public): \(error.localizedDescription, privacy: .public)")
-            return false
-        }
+        guard isSystemAgent(app.bundleIdentifier ?? "") else { return false }
+        kill(app.processIdentifier, SIGTERM)
+        return await waitUntilGone(app)
     }
 
     private static func waitUntilGone(_ app: NSRunningApplication) async -> Bool {

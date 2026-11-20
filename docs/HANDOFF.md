@@ -22,6 +22,7 @@
 16. `perch-cutoff`: Arrange draws the bar to scale and ends where the screen does; on another display, a MacBook mark shows where its screen would cut off. No instruction text.
 17. `perch-welcome`: one-time welcome under the menu bar (three lines, asks for Accessibility).
 18. `perch-bar-stays`: Perch's bar stays open while an icon's menu is up, with that icon highlighted; it closes after you pick something.
+19. `perch-no-restart`: Perch never restarts apps. Moves that only need the divider are instant; Hidden's order is Perch's own (`hiddenOrder`); other moves wait for the app's next launch (`pendingMoves`, undone exactly if you move the icon back).
 
 ## macOS 26 facts
 - Every status item window is owned by Control Center (layer 25); AX per app gives identity (AXExtrasMenuBar).
@@ -29,10 +30,9 @@
 - Frames are empty right after creating a status item; valid ~0.5 s later.
 - Items behind the notch aren't drawn and can't be dragged. The drawer is the fix.
 - AXPress opens Shottr and Wispr Flow's menus even when it reports an error. No synthetic clicks anywhere.
-- Icon order is `NSStatusItem Preferred Position <name>` in each app's defaults (sandboxed apps: their container plist). Roughly the distance from the right edge; the whole bar sorts by it. Apps read it at launch, so a move = write + restart. Control Center's items are in com.apple.controlcenter; it relaunches itself after SIGTERM.
+- Icon order is `NSStatusItem Preferred Position <name>` in each app's defaults (sandboxed apps: their container plist). Roughly the distance from the right edge; the whole bar sorts by it. Apps read it at launch only, so another app's icon moves on its next launch (Perch doesn't restart apps: some show nag windows on launch). Control Center's items are in com.apple.controlcenter; it relaunches itself after SIGTERM.
 - ⌘-drag events posted to a pid (cursor untouched) don't move icons. Only a real pointer drag does, so Perch doesn't drag at all.
 - Removing a status item makes macOS forget its saved position, so Perch's items switch between two autosave names to move.
-- Stats takes about 3 s to put its icon back after a restart.
 - AXPress on a hidden (off-screen) icon opens its menu off screen. While open, the AXMenu child of the item exposes every item (title, enabled, AXMenuItemMarkChar, AXMenuItemCmdChar/Modifiers: 1 shift, 2 option, 4 control, 8 no command) and submenus; AXPress on any item, even in a closed submenu, picks it. AXCancel on the AXMenu closes it.
 - Panel-style icons (Stats) open an AXWindow whose position is settable.
 - Each display draws its own copy of the status item windows.
