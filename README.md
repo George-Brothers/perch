@@ -8,20 +8,20 @@ A light menu bar manager for macOS. Perch hides the menu bar icons you don't nee
 
 ## What it does
 
-- **Click the bird to show or hide.** Hidden icons come back with one click and go away with another.
+- **Click empty menu bar space to show or hide.** Hidden icons come back with one click and go away with another. Perch adds nothing to your bar unless you want it to: a thin line or an icon are options in Settings.
 - **Put every icon where you want it.** Arrange mirrors your menu bar: the bar in order, then Hidden, then icons turned off in System Settings. Drag an icon anywhere and Perch moves the real one there. Order is priority: when the bar is full, icons on the left wait in Hidden until there's room.
 - **Drawer (optional).** Hidden icons drop down in a small bar under the menu bar, so nothing has to fit next to the notch. Needs Screen Recording, so it's off until you turn it on in Settings → Features.
 - **Spotlight.** Every menu bar icon shows up in Spotlight. Type its name and press Return to open its menu, even when it's hidden.
 - **Shortcuts.** Show Hidden Icons, Arrange Menu Bar and Open Menu Bar Icon actions.
 - **Tighter spacing.** A slider fits more icons in the same bar.
-- **Auto-hide**, launch at login and a choice of menu bar icon.
+- **Auto-hide** and launch at login.
 
 Perch uses about 15 MB of memory and no CPU while idle. It reacts to events and never polls. It needs Accessibility to see and move icons; Screen Recording only if you turn on the drawer.
 
 ## Using it
 
-- **Click** the bird: show or hide hidden icons (or open the drawer, if it's on).
-- **Right-click** the bird: Arrange. Drag icons to reorder them. Settings and Quit are in its ⋯ menu.
+- **Click** empty menu bar space (or Perch's line or icon): show or hide hidden icons, or open the drawer if it's on.
+- **Right-click** empty menu bar space: Arrange. Drag icons to reorder them. Settings and Quit are in its ⋯ menu.
 - **Spotlight**: "Arrange Menu Bar" opens Arrange too.
 - **⌘Space**, then an icon's name: open that icon's menu.
 

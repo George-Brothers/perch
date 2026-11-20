@@ -9,7 +9,7 @@ final class DrawerController {
     private let images: IconImages
     private let preferences: Preferences
     private var panel: PerchPanel?
-    private weak var anchor: NSStatusBarButton?
+    private var anchor: PanelAnchor?
     private var outsideClickMonitor: Any?
     private var keyMonitor: Any?
     private var resizeObserver: NSObjectProtocol?
@@ -29,11 +29,11 @@ final class DrawerController {
     /// False as soon as closing starts, so a click during the fade reopens it.
     private(set) var isOpen = false
 
-    func toggle(anchor: NSStatusBarButton?) {
+    func toggle(anchor: PanelAnchor?) {
         isOpen ? close() : open(anchor: anchor)
     }
 
-    func open(anchor: NSStatusBarButton?) {
+    func open(anchor: PanelAnchor?) {
         self.anchor = anchor
         let panel = self.panel ?? makePanel()
         self.panel = panel
@@ -118,8 +118,8 @@ final class DrawerController {
 
     private func position(_ panel: NSPanel) {
         let size = panel.frame.size
-        let anchorFrame = anchor?.window?.frame
-        guard let screen = anchor?.window?.screen ?? NSScreen.main else { return }
+        let anchorFrame = anchor?()
+        guard let screen = anchorFrame.flatMap(PanelAnchorScreen.of) ?? NSScreen.main else { return }
         let barBottom = screen.frame.maxY - MenuBarGeometry.menuBarHeight(for: screen)
         let visible = screen.frame
         var x = (anchorFrame?.maxX ?? visible.maxX - 8) - size.width + 1
@@ -136,7 +136,8 @@ final class DrawerController {
             matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
         ) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self, !self.engine.isArranging else { return }
+                // Empty menu bar space toggles the panel itself (see MenuBarController).
+                guard let self, !MenuBarGeometry.isEmptyMenuBarSpace(NSEvent.mouseLocation), !self.engine.isArranging else { return }
                 self.close()
             }
         }

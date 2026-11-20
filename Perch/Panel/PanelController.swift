@@ -1,6 +1,17 @@
 import AppKit
 import SwiftUI
 
+/// What a panel hangs from: a frame in screen coordinates (bottom-left origin),
+/// read again each time the panel repositions, since items move.
+typealias PanelAnchor = @MainActor () -> NSRect?
+
+enum PanelAnchorScreen {
+    /// The display an anchor sits on.
+    static func of(_ frame: NSRect) -> NSScreen? {
+        NSScreen.screens.first { NSMouseInRect(NSPoint(x: frame.midX, y: frame.midY), $0.frame, false) }
+    }
+}
+
 /// The dropdown that hangs from the bird. It's built on first use, kept for
 /// reuse, and listens for outside clicks only while it's open.
 @MainActor
@@ -8,7 +19,7 @@ final class PanelController {
     private let model: LayoutEngine
     private let makeContent: () -> AnyView
     private var panel: PerchPanel?
-    private weak var anchor: NSStatusBarButton?
+    private var anchor: PanelAnchor?
     private var outsideClickMonitor: Any?
     private var keyMonitor: Any?
     private var resizeObserver: NSObjectProtocol?
@@ -23,11 +34,11 @@ final class PanelController {
 
     var isOpen: Bool { panel?.isVisible == true }
 
-    func toggle(anchor: NSStatusBarButton?) {
+    func toggle(anchor: PanelAnchor?) {
         isOpen ? close() : open(anchor: anchor)
     }
 
-    func open(anchor: NSStatusBarButton?) {
+    func open(anchor: PanelAnchor?) {
         self.anchor = anchor
         let panel = self.panel ?? makePanel()
         self.panel = panel
@@ -78,8 +89,8 @@ final class PanelController {
 
     private func position(_ panel: NSPanel) {
         let size = panel.frame.size
-        let anchorFrame = anchor?.window?.frame
-        let screen = anchor?.window?.screen ?? NSScreen.main
+        let anchorFrame = anchor?()
+        let screen = anchorFrame.flatMap(PanelAnchorScreen.of) ?? NSScreen.main
         guard let visible = screen?.visibleFrame else { return }
 
         let top = (anchorFrame?.minY ?? visible.maxY) - 6
@@ -100,7 +111,8 @@ final class PanelController {
         ) { [weak self] _ in
             MainActor.assumeIsolated {
                 // Perch's own icon moves are clicks too; they shouldn't close the list.
-                guard let self, !self.model.isArranging else { return }
+                // Empty menu bar space toggles the panel itself (see MenuBarController).
+                guard let self, !MenuBarGeometry.isEmptyMenuBarSpace(NSEvent.mouseLocation), !self.model.isArranging else { return }
                 self.close()
             }
         }

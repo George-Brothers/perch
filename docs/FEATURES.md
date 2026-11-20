@@ -22,15 +22,16 @@ Perch is a light menu bar manager for macOS. The goal: the menu bar macOS should
 
 | Feature | How it works |
 |---|---|
-| Show and hide | Click the bird. A divider stretched 10,000 pt pushes hidden icons off screen. |
+| Show and hide | Click empty menu bar space (or Perch's line or icon). A divider stretched 10,000 pt pushes hidden icons off screen. |
+| In the menu bar | Nothing (default), a line, or an icon. With nothing, Accessibility tells Perch a click landed on the front app's empty bar, not an icon. Without Accessibility the icon stays. |
 | Order | Each icon is in the bar or Hidden, and the bar's order is its priority: when it runs out of room, the leftmost icons wait in Hidden. Perch ⌘-drags icons to match on launch, a change in Arrange, display change, wake, unlock, and app launch or quit. |
-| Arrange | Right-click the bird. Rows that mirror the bar: Menu bar (in order, Perch's own item included), Hidden, Turned off. Drag an icon to any spot and Perch ⌘-drags the real one there. Turned-off icons open System Settings → Menu Bar. |
+| Arrange | Right-click empty menu bar space. Rows that mirror the bar: Menu bar (in order, Perch's own item included), Hidden, Turned off. Drag an icon to any spot and Perch ⌘-drags the real one there. Turned-off icons open System Settings → Menu Bar. |
 | Drawer (opt-in) | Hidden icons in a small bar under the menu bar. Needs Screen Recording; turned on in Settings → Features after an explanation. |
 | Spotlight | Every icon is a Core Spotlight item, re-indexed only when the set of icons changes. Picking one opens its menu, even when hidden. |
 | Shortcuts | App Intents: Show Hidden Icons, Open Menu Bar Icon (any icon, by name). |
 | Spacing | Slider for `NSStatusItemSpacing` and `NSStatusItemSelectionPadding`. Apps pick it up when they reopen; Perch offers to reopen them. |
 | Auto-hide | After a delay or a click outside. Never while a menu is open or the pointer is in the bar. |
-| Settings | General, Features, Icons, About. Launch at login, icon style. |
+| Settings | General, Features, Icons, About. Launch at login, what Perch shows in the bar. |
 
 ## Next
 
