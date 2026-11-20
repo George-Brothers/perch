@@ -116,27 +116,22 @@ enum StatusItemPositions {
     }
 }
 
-/// Restarts Control Center and macOS's other menu bar agents so Apple's icons
-/// pick up new positions. They have no windows and come straight back. Perch
-/// never restarts your apps.
+/// Restarts Control Center. On macOS 26 it draws every app's menu bar icons
+/// and places each at its saved spot when it starts, so this applies saved
+/// spots without restarting any app. It has no windows and macOS starts it
+/// again by itself; Apple's icons blink for a moment.
 enum AppRestarter {
-    /// Apps whose icons belong to a system process that macOS restarts by itself.
-    static func isSystemAgent(_ bundleID: String) -> Bool {
-        bundleID.hasPrefix("com.apple.")
-    }
-
-    /// Quits a system agent; macOS starts it again by itself. False if it didn't quit.
-    static func restart(_ app: NSRunningApplication) async -> Bool {
-        guard isSystemAgent(app.bundleIdentifier ?? "") else { return false }
+    static func restartControlCenter() async {
+        guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.controlcenter").first
+        else { return }
         kill(app.processIdentifier, SIGTERM)
-        return await waitUntilGone(app)
-    }
-
-    private static func waitUntilGone(_ app: NSRunningApplication) async -> Bool {
-        for _ in 0..<100 {
-            if app.isTerminated { return true }
+        // Gone, then back with its icons drawn.
+        for _ in 0..<60 where !app.isTerminated { try? await Task.sleep(for: .milliseconds(50)) }
+        for _ in 0..<60 {
+            if let next = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.controlcenter").first,
+               next.processIdentifier != app.processIdentifier, next.isFinishedLaunching { break }
             try? await Task.sleep(for: .milliseconds(50))
         }
-        return app.isTerminated
+        try? await Task.sleep(for: .milliseconds(300))
     }
 }

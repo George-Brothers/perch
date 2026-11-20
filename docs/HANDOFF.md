@@ -23,6 +23,9 @@
 17. `perch-welcome`: one-time welcome under the menu bar (three lines, asks for Accessibility).
 18. `perch-bar-stays`: Perch's bar stays open while an icon's menu is up, with that icon highlighted; it closes after you pick something.
 19. `perch-no-restart`: Perch never restarts apps. Moves that only need the divider are instant; Hidden's order is Perch's own (`hiddenOrder`); other moves wait for the app's next launch (`pendingMoves`, undone exactly if you move the icon back).
+20. `perch-arrange-drag`: drags across rows no longer get stuck (gesture on the rows, cancelled drags clear).
+21. `perch-arrange-still`: Arrange holds still once you use it (top and right edges pinned).
+22. `perch-instant-moves`: every Arrange move is instant: save positions, restart Control Center once, check each icon landed (else it waits, as in 19). Hiding checks priorities, not what's on screen, and puts the icon left of every icon meant to show.
 
 ## macOS 26 facts
 - Every status item window is owned by Control Center (layer 25); AX per app gives identity (AXExtrasMenuBar).
@@ -30,7 +33,7 @@
 - Frames are empty right after creating a status item; valid ~0.5 s later.
 - Items behind the notch aren't drawn and can't be dragged. The drawer is the fix.
 - AXPress opens Shottr and Wispr Flow's menus even when it reports an error. No synthetic clicks anywhere.
-- Icon order is `NSStatusItem Preferred Position <name>` in each app's defaults (sandboxed apps: their container plist). Roughly the distance from the right edge; the whole bar sorts by it. Apps read it at launch only, so another app's icon moves on its next launch (Perch doesn't restart apps: some show nag windows on launch). Control Center's items are in com.apple.controlcenter; it relaunches itself after SIGTERM.
+- Icon order is `NSStatusItem Preferred Position <name>` in each app's defaults (sandboxed apps: their container plist). Roughly the distance from the right edge; the whole bar sorts by it. Apps read it at launch, but on macOS 26 Control Center draws every status item and re-reads all saved positions when it restarts (SIGTERM; launchd brings it back in ~1 s). Tested 2026-11-18 with ActivityWatch, Google Drive and Shottr: they moved, their pids didn't change. Perch never restarts other apps (some show nag windows on launch). Control Center's items are in com.apple.controlcenter; it relaunches itself after SIGTERM.
 - ⌘-drag events posted to a pid (cursor untouched) don't move icons. Only a real pointer drag does, so Perch doesn't drag at all.
 - Removing a status item makes macOS forget its saved position, so Perch's items switch between two autosave names to move.
 - AXPress on a hidden (off-screen) icon opens its menu off screen. While open, the AXMenu child of the item exposes every item (title, enabled, AXMenuItemMarkChar, AXMenuItemCmdChar/Modifiers: 1 shift, 2 option, 4 control, 8 no command) and submenus; AXPress on any item, even in a closed submenu, picks it. AXCancel on the AXMenu closes it.
