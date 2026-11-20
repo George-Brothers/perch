@@ -196,11 +196,9 @@ struct DrawerView: View {
     private func priorityMenu(for item: MenuBarItem) -> some View {
         Text(item.displayName)
         Divider()
-        ForEach([IconPriority.always, .auto]) { priority in
-            Button(priority.menuTitle) {
-                onClose()
-                engine.setPriority(priority, for: item)
-            }
+        Button("Show in Menu Bar") {
+            onClose()
+            engine.setPriority(.shown, for: item)
         }
         Divider()
         Button("Arrange Icons…", action: onArrange)

@@ -9,11 +9,6 @@ import ApplicationServices
 /// Runs only when asked (when the Perch panel opens), never on a timer.
 enum MenuBarScanner {
     /// Items that are always visible and can't be moved, so listing them is noise.
-    private static let skippedIdentifiers: Set<String> = [
-        "com.apple.menuextra.clock",
-        "com.apple.menuextra.controlcenter",
-    ]
-
     private struct AppInfo {
         let pid: pid_t
         let bundleID: String?
@@ -55,7 +50,6 @@ enum MenuBarScanner {
             // Later presses and frame checks go to the item itself; keep them short too.
             AXUIElementSetMessagingTimeout(child, 0.25)
             let identifier = AX.string(child, kAXIdentifierAttribute)
-            if let identifier, skippedIdentifiers.contains(identifier) { continue }
 
             guard let frame = AX.frame(of: child), frame.width > 0, frame.height > 0 else { continue }
             let label = AX.string(child, kAXDescriptionAttribute) ?? AX.string(child, kAXTitleAttribute)

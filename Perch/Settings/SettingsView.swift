@@ -41,11 +41,9 @@ struct IconsPane: View {
     var body: some View {
         Form {
             Section {
-                ArrangeShelves(engine: engine, preferences: preferences, permissions: permissions, images: images)
+                ArrangeBar(engine: engine, preferences: preferences, permissions: permissions,
+                           images: images, maxWidth: 560)
                     .padding(.vertical, 4)
-            } footer: {
-                Text("Drag icons between shelves. Perch moves them in the menu bar for you.")
-                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)

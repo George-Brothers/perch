@@ -23,8 +23,8 @@ Perch is a light menu bar manager for macOS. The goal: the menu bar macOS should
 | Feature | How it works |
 |---|---|
 | Show and hide | Click the bird. A divider stretched 10,000 pt pushes hidden icons off screen. |
-| Priorities | Each icon is Always show, Show when there's room, or Hidden. Perch ⌘-drags icons across the divider to match, on launch, priority change, display change, wake, unlock, and app launch or quit. |
-| Arrange | Three shelves; drag an icon to the one you want. Right-click for the same moves. |
+| Order | Each icon is in the bar or Hidden, and the bar's order is its priority: when it runs out of room, the leftmost icons wait in Hidden. Perch ⌘-drags icons to match on launch, a change in Arrange, display change, wake, unlock, and app launch or quit. |
+| Arrange | Right-click the bird. Rows that mirror the bar: Menu bar (in order, Perch's own item included), Hidden, Turned off. Drag an icon to any spot and Perch ⌘-drags the real one there. Turned-off icons open System Settings → Menu Bar. |
 | Drawer (opt-in) | Hidden icons in a small bar under the menu bar. Needs Screen Recording; turned on in Settings → Features after an explanation. |
 | Spotlight | Every icon is a Core Spotlight item, re-indexed only when the set of icons changes. Picking one opens its menu, even when hidden. |
 | Shortcuts | App Intents: Show Hidden Icons, Open Menu Bar Icon (any icon, by name). |

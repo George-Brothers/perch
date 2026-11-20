@@ -49,6 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 preferences: preferences,
                 permissions: permissions,
                 images: images,
+                maxWidth: min((menuBar.screen?.visibleFrame.width ?? 900) - 60, 900),
                 onOpenItem: { item in
                     self?.arrangePanel.close()
                     if self?.open(item) == false { NSSound.beep() }
@@ -127,9 +128,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return true
         }
 
-        menuBar.usesDrawer = {
-            preferences.drawerEnabled && permissions.hasScreenRecording && permissions.hasAccessibility
-        }
 
         // Every icon is a Spotlight result; picking one opens its menu.
         spotlight = SpotlightIndex(engine: engine)
@@ -167,6 +165,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if drawer.isOpen { return }
         if menuBar.toggleDrawer?() == true { return }
         menuBar.reveal()
+    }
+
+    /// Opens Arrange (from Spotlight); running it again leaves it open.
+    func showArrange() {
+        guard !arrangePanel.isOpen else { return }
+        closePanels(except: .arrange)
+        arrangePanel.open(anchor: menuBar.perchButton)
     }
 
     func icons() async -> [MenuBarItem] {
