@@ -385,6 +385,8 @@ final class LayoutEngine: ObservableObject {
                     return true
                 } else {
                     waitsForClose = false
+                    // A respace held while Arrange was open counts from when it runs.
+                    if respacing, let pair = respacePair { respaced[pair] = Date() }
                     await commit(plan, order, members: members, in: current)
                     done()
                     current = await scan()
@@ -553,6 +555,8 @@ final class LayoutEngine: ObservableObject {
     /// When each pair of icons was last spread out, so one that spreading
     /// didn't help doesn't restart Control Center over and over.
     private var respaced: [String: Date] = [:]
+    /// The pair a queued respace is for; its 10 minutes restart when it runs.
+    private var respacePair: String?
 
     /// The icons on either side of where the divider has to go are saved too
     /// close together for it to fit between them: save the bar's spots again,
@@ -596,6 +600,7 @@ final class LayoutEngine: ObservableObject {
         }
         log.notice("saved spots are too close for the divider; spreading \(plan.writes.count, privacy: .public) out")
         respaced[pair] = Date()
+        respacePair = pair
         respacing = true
         queuedFrom = members
         queuedRevision += 1
