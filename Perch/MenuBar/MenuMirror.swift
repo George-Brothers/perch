@@ -33,10 +33,20 @@ enum MenuMirror {
         case nothing
     }
 
+    enum Outcome {
+        /// Its menu was shown and you picked an item.
+        case picked
+        /// Its menu was shown and you closed it without picking.
+        case dismissed
+        /// It opened a panel, which is now under Perch's bar.
+        case panel
+        /// It showed nothing Perch could bring over.
+        case failed
+    }
+
     /// Opens a hidden icon with its menu's top-left corner at `point` (screen
-    /// coordinates, bottom-left origin). False if the icon showed nothing Perch
-    /// could bring over; the caller can fall back to showing it in the bar.
-    static func open(_ item: MenuBarItem, at point: NSPoint) async -> Bool {
+    /// coordinates, bottom-left origin). Returns once its menu has closed.
+    static func open(_ item: MenuBarItem, at point: NSPoint) async -> Outcome {
         let element = item.element
         let pid = item.pid
         let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
@@ -51,13 +61,12 @@ enum MenuMirror {
         }.value
         switch result {
         case .menu(let entries):
-            show(entries, for: item, at: point)
-            return true
+            return show(entries, for: item, at: point) ? .picked : .dismissed
         case .panel:
-            return true
+            return .panel
         case .nothing:
             log.notice("\(item.displayName, privacy: .public) opened nothing Perch could show")
-            return false
+            return .failed
         }
     }
 
@@ -122,12 +131,14 @@ enum MenuMirror {
     /// Keeps the handler alive while its menu is up (menu items hold targets weakly).
     private static var handler: Handler?
 
-    private static func show(_ entries: [Entry], for item: MenuBarItem, at point: NSPoint) {
+    /// Shows the copied menu until it closes. True if you picked an item.
+    private static func show(_ entries: [Entry], for item: MenuBarItem, at point: NSPoint) -> Bool {
         let handler = Handler(item: item)
         self.handler = handler
         let menu = NSMenu()
         add(entries, to: menu, handler: handler)
         menu.popUp(positioning: nil, at: point, in: nil)
+        return handler.picked
     }
 
     private static func add(_ entries: [Entry], to menu: NSMenu, handler: Handler) {
@@ -156,6 +167,7 @@ enum MenuMirror {
 
     private final class Handler: NSObject {
         let item: MenuBarItem
+        private(set) var picked = false
 
         init(item: MenuBarItem) {
             self.item = item
@@ -163,6 +175,7 @@ enum MenuMirror {
 
         @objc func pick(_ sender: NSMenuItem) {
             guard let path = sender.representedObject as? [Int] else { return }
+            picked = true
             let element = item.element
             let title = sender.title
             Task.detached(priority: .userInitiated) {

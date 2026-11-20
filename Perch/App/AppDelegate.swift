@@ -128,7 +128,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let drawer = DrawerController(engine: engine, images: images, preferences: preferences)
         self.drawer = drawer
         drawer.onOpenItem = { [weak self] item, point in
-            Task { await self?.open(item, at: point) }
+            await self?.openFromBar(item, at: point) ?? true
         }
         drawer.onOpenArrange = { [weak self] in self?.arrangePanel.open(anchor: menuBar.anchor) }
         menuBar.toggleDrawer = { [weak self] in
@@ -226,8 +226,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ItemOpener.open(item)
             return true
         }
-        if await MenuMirror.open(item, at: point ?? defaultMenuPoint()) { return true }
+        if await MenuMirror.open(item, at: point ?? defaultMenuPoint()) != .failed { return true }
         return menuBar.openTemporarily(item)
+    }
+
+    /// Opens an icon clicked in Perch's bar. True when Perch's bar should
+    /// close: after you pick something, or if the icon had to come out into
+    /// the menu bar. Closing its menu without picking leaves the bar open.
+    private func openFromBar(_ item: MenuBarItem, at point: NSPoint) async -> Bool {
+        switch await MenuMirror.open(item, at: point) {
+        case .picked: return true
+        case .dismissed, .panel: return false
+        case .failed:
+            menuBar.openTemporarily(item)
+            return true
+        }
     }
 
     /// Just under the menu bar, where hidden icons start.
