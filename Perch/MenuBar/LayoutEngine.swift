@@ -144,8 +144,12 @@ final class LayoutEngine: ObservableObject {
             case .perch: return .perch
             case .fixed: return nil
             case .icon(let key):
-                guard items.first(where: { $0.key == key })?.isMovable == true,
+                guard let item = items.first(where: { $0.key == key }), item.isMovable,
                       preferences.priority(for: key) == .shown else { return nil }
+                // An icon with no saved spot at all (macOS's Now Playing, say)
+                // that showed up among the hidden ones stays there: Perch can't
+                // move it, and asking for it shown would block every other move.
+                if item.section == .hidden, slots[key] == nil { return nil }
                 return .icon(key)
             }
         }
