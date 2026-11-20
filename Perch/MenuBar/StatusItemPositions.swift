@@ -21,6 +21,9 @@ enum StatusItemPositions {
         /// The icon's autosave name, the part of the key after the prefix.
         let name: String
         var value: Double?
+        /// In a sandboxed app's container. macOS asks the user before every
+        /// change there, so Perch never writes it (see `LayoutEngine.movesAround`).
+        var isPrivate: Bool { domain.hasPrefix("/") }
     }
 
     /// The settings an app reads: its sandbox container if it's sandboxed.
