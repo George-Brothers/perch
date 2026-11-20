@@ -63,6 +63,9 @@ final class LayoutEngine: ObservableObject {
     /// that shows up later (an app that just opened) isn't part of it: it
     /// stays where macOS put it, with its own priority.
     private(set) var queuedFrom: Set<String> = []
+    /// The icons you placed yourself in the current order. Only these of the
+    /// ones that stay put (see `staysPut`) get a priority from it.
+    private var queuedPlaced: Set<String> = []
     /// Goes up with every accepted drop, so a pass clears only the batch it applied.
     private var queuedRevision = 0
 
@@ -113,6 +116,7 @@ final class LayoutEngine: ObservableObject {
         if !shown { setHiddenOrder(item.key, before: anchor, shown: order) }
         notice = nil
         respacing = false
+        queuedPlaced = fresh ? [item.key] : queuedPlaced.union([item.key])
         queuedFrom = members
         queuedRevision += 1
         queued = order
@@ -141,6 +145,7 @@ final class LayoutEngine: ObservableObject {
         }
         notice = nil
         respacing = false
+        if fresh { queuedPlaced = [] }
         queuedFrom = members
         queuedRevision += 1
         queued = order
@@ -367,6 +372,9 @@ final class LayoutEngine: ObservableObject {
             let members = queuedFrom, revision = queuedRevision
             // Read now: a drop while this runs clears the flag, but this batch is still a respace.
             let isRespace = respacing, pair = respacePair
+            // Icons that stay put and you didn't place keep their priority (judged
+            // now, before a restart can move them).
+            let leaving = Set(current.filter { staysPut($0) }.map(\.key)).subtracting(queuedPlaced)
             if isRespace, let pair { respaced[pair] = Date() }
             func done() { if queuedRevision == revision { queued = nil } }
             if let plan = plan(order, in: current, members: members) {
@@ -380,7 +388,7 @@ final class LayoutEngine: ObservableObject {
                     }
                     // Accessibility gone meanwhile: the new scan is empty, so go by the old one.
                     setPriorities(order, in: permissions.hasAccessibility ? current : before, members: members,
-                                  keepsPriorities: isRespace)
+                                  keepsPriorities: isRespace, leaving: leaving)
                     done()
                 } else if holdsMoves {
                     log.notice("\(plan.writes.count, privacy: .public) icons move when Arrange closes")
@@ -389,7 +397,7 @@ final class LayoutEngine: ObservableObject {
                     return true
                 } else {
                     waitsForClose = false
-                    await commit(plan, order, members: members, keepsPriorities: isRespace, in: current)
+                    await commit(plan, order, members: members, keepsPriorities: isRespace, leaving: leaving, in: current)
                     done()
                     current = await scan()
                     // Accessibility can go while Control Center restarts.
@@ -604,6 +612,7 @@ final class LayoutEngine: ObservableObject {
         log.notice("saved spots are too close for the divider; spreading \(plan.writes.count, privacy: .public) out")
         respacePair = pair
         respacing = true
+        queuedPlaced = []
         queuedFrom = members
         queuedRevision += 1
         queued = order
@@ -760,7 +769,7 @@ final class LayoutEngine: ObservableObject {
     /// draws every app's icons and puts each at its saved spot when it starts,
     /// so they move without their apps restarting. Then checks they landed.
     private func commit(_ plan: Plan, _ order: [Spot], members: Set<String>, keepsPriorities: Bool = false,
-                        in items: [MenuBarItem]) async {
+                        leaving: Set<String> = [], in items: [MenuBarItem]) async {
         // All or nothing: if one spot can't be saved, put back the ones that
         // were, so the next restart (or login) doesn't apply half a move.
         var saved: [Plan.Write] = []
@@ -804,11 +813,11 @@ final class LayoutEngine: ObservableObject {
         guard permissions.hasAccessibility else {
             log.notice("Accessibility went away during a move; not checking it")
             // The spots are applied; keep which side each icon is on, too.
-            setPriorities(order, in: items, members: members, keepsPriorities: keepsPriorities)
+            setPriorities(order, in: items, members: members, keepsPriorities: keepsPriorities, leaving: leaving)
             return
         }
         let previous = Dictionary(uniqueKeysWithValues: members.map { ($0, preferences.priority(for: $0)) })
-        setPriorities(order, in: after, members: members, keepsPriorities: keepsPriorities)
+        setPriorities(order, in: after, members: members, keepsPriorities: keepsPriorities, leaving: leaving)
         // One that never came back can't be checked: treat it as out of place.
         let missing = saved.map(\.key).filter { key in !after.contains { $0.key == key && $0.isInMenuBar } }
         let wrong = missing + misplaced(order, in: after, moved: movedKeys, members: members)
@@ -839,12 +848,13 @@ final class LayoutEngine: ObservableObject {
 
     /// Marks what's in `order` shown and the other icons that were part of it hidden.
     /// `keepsPriorities`: a respace, which only saves spots again.
+    /// `leaving`: icons that stay put, left out of the order without you asking.
     private func setPriorities(_ order: [Spot], in items: [MenuBarItem], members: Set<String>? = nil,
-                               keepsPriorities: Bool = false) {
+                               keepsPriorities: Bool = false, leaving: Set<String> = []) {
         guard !keepsPriorities else { return }
         let members = members ?? queuedFrom
         for item in items where item.isInMenuBar && item.isMovable && members.contains(item.key) {
-            if staysPut(item) && !order.contains(.icon(item.key)) { continue }
+            if leaving.contains(item.key) && !order.contains(.icon(item.key)) { continue }
             let priority: IconPriority = order.contains(.icon(item.key)) ? .shown : .hidden
             if preferences.priority(for: item.key) != priority { preferences.setPriority(priority, for: item.key) }
         }
