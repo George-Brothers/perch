@@ -58,6 +58,8 @@ struct ArrangeBar: View {
     /// The rows as you dropped them, shown until Perch has moved the real icon.
     @State private var pending: [Row: [Slot]]?
     @State private var offHint: String?
+    /// This press started on nothing; logged once.
+    @State private var ignoredDrag = false
 
     private let labelWidth: CGFloat = 70
 
@@ -82,12 +84,16 @@ struct ArrangeBar: View {
                 .simultaneousGesture(dragGesture)
                 .onChange(of: dragging) { _, down in
                     guard !down else { return }
+                    ignoredDrag = false
                     // After onEnded has had its chance to drop the icon.
                     DispatchQueue.main.async { drag = nil }
                 }
                 .overlay(alignment: .topLeading) { floatingIcon }
-                .onPreferenceChange(SlotFrames.self) { if drag == nil { frames = $0 } }
-                .onPreferenceChange(RowFrames.self) { if drag == nil { rowFrames = $0 } }
+                // Always current: a drag snapshots these when it starts. (Skipping
+                // updates mid-drag left them stale, since the layout after a drop
+                // is the one already previewed and doesn't change again.)
+                .onPreferenceChange(SlotFrames.self) { frames = $0 }
+                .onPreferenceChange(RowFrames.self) { rowFrames = $0 }
                 .onPreferenceChange(ContentWidth.self) { contentWidth = $0 }
                 .animation(.snappy(duration: 0.18), value: rows)
 
@@ -252,7 +258,8 @@ struct ArrangeBar: View {
                         original: rows, frames: frames, rowFrames: rowFrames
                     )
                     arrangeLog.notice("drag started from \(row.title, privacy: .public)")
-                } else if drag == nil {
+                } else if drag == nil, !ignoredDrag {
+                    ignoredDrag = true
                     arrangeLog.notice("drag ignored: nothing under the pointer")
                 }
                 drag?.location = value.location
