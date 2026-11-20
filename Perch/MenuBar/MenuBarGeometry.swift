@@ -22,6 +22,9 @@ enum MenuBarGeometry {
     /// but are not menus.
     private static let ignoredOwners: Set<String> = ["Window Server", "Dock", "Notification Center"]
 
+    /// Perch's Arrange panel, which sits at menu level but isn't a menu.
+    @MainActor static var ignoredWindowNumber: Int?
+
     /// Whether any app has a menu or menu bar panel open right now.
     /// Reads window levels and sizes only, so it needs no Screen Recording permission.
     ///
@@ -31,7 +34,7 @@ enum MenuBarGeometry {
     ///   one level below the menu bar, starting at the top of the screen),
     /// - a popover hanging from a menu bar icon.
     /// Overlay windows above level 1000 (dictation pills and the like) are ignored.
-    static func isMenuOpen() -> Bool {
+    @MainActor static func isMenuOpen() -> Bool {
         guard let windows = CGWindowListCopyWindowInfo(
             [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID
         ) as? [[String: Any]] else {
@@ -39,8 +42,9 @@ enum MenuBarGeometry {
         }
         let menuLevel = Int(CGWindowLevelForKey(.popUpMenuWindow))
         let barHeight = NSScreen.main.map(menuBarHeight(for:)) ?? 24
-
         for window in windows {
+            // Perch's own Arrange panel sits at menu level but isn't a menu.
+            if let ignored = ignoredWindowNumber, window[kCGWindowNumber as String] as? Int == ignored { continue }
             guard let layer = window[kCGWindowLayer as String] as? Int else { continue }
             if layer == menuLevel { return true }
             guard layer > 0, layer < 1000,

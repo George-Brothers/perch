@@ -26,16 +26,22 @@ enum PerchIconStyle: String, CaseIterable, Identifiable {
     }
 }
 
-enum ClickAction: String, CaseIterable, Identifiable {
-    case openPanel
-    case revealInBar
+/// How much an icon matters to you.
+enum IconPriority: String, CaseIterable, Identifiable {
+    /// Always in the menu bar.
+    case always
+    /// In the menu bar when there's room, otherwise hidden.
+    case auto
+    /// Only shown when you click the bird.
+    case hide
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .openPanel: "Open the Perch panel"
-        case .revealInBar: "Show hidden icons in the menu bar"
+        case .always: "Always"
+        case .auto: "Auto"
+        case .hide: "Hide"
         }
     }
 }
@@ -47,13 +53,10 @@ final class Preferences: ObservableObject {
 
     private enum Key {
         static let iconStyle = "iconStyle"
-        static let clickAction = "clickAction"
-        static let archivedSectionEnabled = "archivedSectionEnabled"
+        static let priorities = "iconPriorities"
         static let autoRehideEnabled = "autoRehideEnabled"
         static let rehideDelay = "rehideDelay"
         static let rehideOnClickOutside = "rehideOnClickOutside"
-        static let rehideOnAppSwitch = "rehideOnAppSwitch"
-        static let hasSeenWelcome = "hasSeenWelcome"
     }
 
     private let defaults: UserDefaults
@@ -61,12 +64,9 @@ final class Preferences: ObservableObject {
     @Published var iconStyle: PerchIconStyle {
         didSet { defaults.set(iconStyle.rawValue, forKey: Key.iconStyle) }
     }
-    /// What a plain click on the bird does. Option-click does the other one.
-    @Published var clickAction: ClickAction {
-        didSet { defaults.set(clickAction.rawValue, forKey: Key.clickAction) }
-    }
-    @Published var archivedSectionEnabled: Bool {
-        didSet { defaults.set(archivedSectionEnabled, forKey: Key.archivedSectionEnabled) }
+    /// Priority per icon, keyed by `MenuBarItem.key`. Icons not listed are `.auto`.
+    @Published private(set) var priorities: [String: IconPriority] {
+        didSet { defaults.set(priorities.mapValues(\.rawValue), forKey: Key.priorities) }
     }
     @Published var autoRehideEnabled: Bool {
         didSet { defaults.set(autoRehideEnabled, forKey: Key.autoRehideEnabled) }
@@ -78,32 +78,32 @@ final class Preferences: ObservableObject {
     @Published var rehideOnClickOutside: Bool {
         didSet { defaults.set(rehideOnClickOutside, forKey: Key.rehideOnClickOutside) }
     }
-    @Published var rehideOnAppSwitch: Bool {
-        didSet { defaults.set(rehideOnAppSwitch, forKey: Key.rehideOnAppSwitch) }
-    }
-    @Published var hasSeenWelcome: Bool {
-        didSet { defaults.set(hasSeenWelcome, forKey: Key.hasSeenWelcome) }
-    }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         defaults.register(defaults: [
             Key.iconStyle: PerchIconStyle.bird.rawValue,
-            Key.clickAction: ClickAction.openPanel.rawValue,
-            Key.archivedSectionEnabled: false,
             Key.autoRehideEnabled: true,
-            Key.rehideDelay: 10.0,
+            Key.rehideDelay: 15.0,
             Key.rehideOnClickOutside: true,
-            Key.rehideOnAppSwitch: false,
-            Key.hasSeenWelcome: false,
         ])
         iconStyle = PerchIconStyle(rawValue: defaults.string(forKey: Key.iconStyle) ?? "") ?? .bird
-        clickAction = ClickAction(rawValue: defaults.string(forKey: Key.clickAction) ?? "") ?? .openPanel
-        archivedSectionEnabled = defaults.bool(forKey: Key.archivedSectionEnabled)
+        let stored = defaults.dictionary(forKey: Key.priorities) as? [String: String] ?? [:]
+        priorities = stored.compactMapValues(IconPriority.init(rawValue:))
         autoRehideEnabled = defaults.bool(forKey: Key.autoRehideEnabled)
         rehideDelay = defaults.double(forKey: Key.rehideDelay)
         rehideOnClickOutside = defaults.bool(forKey: Key.rehideOnClickOutside)
-        rehideOnAppSwitch = defaults.bool(forKey: Key.rehideOnAppSwitch)
-        hasSeenWelcome = defaults.bool(forKey: Key.hasSeenWelcome)
+    }
+
+    func priority(for key: String) -> IconPriority {
+        priorities[key] ?? .auto
+    }
+
+    func setPriority(_ priority: IconPriority, for key: String) {
+        if priority == .auto {
+            priorities.removeValue(forKey: key)
+        } else {
+            priorities[key] = priority
+        }
     }
 }

@@ -3,8 +3,7 @@ import SwiftUI
 
 enum SettingsPane: String, CaseIterable, Identifiable {
     case general
-    case sections
-    case autoHide
+    case icons
     case about
 
     var id: Self { self }
@@ -12,8 +11,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .general: "General"
-        case .sections: "Sections"
-        case .autoHide: "Auto-Hide"
+        case .icons: "Icons"
         case .about: "About"
         }
     }
@@ -21,8 +19,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .general: "gearshape"
-        case .sections: "rectangle.split.3x1"
-        case .autoHide: "timer"
+        case .icons: "menubar.rectangle"
         case .about: "info.circle"
         }
     }
@@ -54,8 +51,8 @@ final class SettingsWindowController {
             window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
             window.toolbarStyle = .unified
             window.isReleasedWhenClosed = false
-            window.setContentSize(NSSize(width: 720, height: 520))
-            window.contentMinSize = NSSize(width: 640, height: 440)
+            window.setContentSize(NSSize(width: 680, height: 500))
+            window.contentMinSize = NSSize(width: 600, height: 420)
             window.center()
             window.setFrameAutosaveName("PerchSettings")
             self.window = window

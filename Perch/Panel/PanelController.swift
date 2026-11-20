@@ -5,7 +5,7 @@ import SwiftUI
 /// reuse, and listens for outside clicks only while it's open.
 @MainActor
 final class PanelController {
-    private let model: PanelModel
+    private let model: LayoutEngine
     private let makeContent: () -> AnyView
     private var panel: PerchPanel?
     private weak var anchor: NSStatusBarButton?
@@ -13,7 +13,7 @@ final class PanelController {
     private var keyMonitor: Any?
     private var resizeObserver: NSObjectProtocol?
 
-    init(model: PanelModel, makeContent: @escaping () -> AnyView) {
+    init(model: LayoutEngine, makeContent: @escaping () -> AnyView) {
         self.model = model
         self.makeContent = makeContent
     }
@@ -32,6 +32,7 @@ final class PanelController {
         position(panel)
         panel.orderFrontRegardless()
         panel.makeKey()
+        MenuBarGeometry.ignoredWindowNumber = panel.windowNumber
         installMonitors()
     }
 
@@ -93,7 +94,11 @@ final class PanelController {
         outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(
             matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.close() }
+            MainActor.assumeIsolated {
+                // Perch's own icon moves are clicks too; they shouldn't close the list.
+                guard let self, !self.model.isArranging else { return }
+                self.close()
+            }
         }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard event.keyCode == 53 else { return event } // Escape
@@ -113,4 +118,13 @@ final class PanelController {
 /// A borderless panel that can still take key events (for Escape).
 final class PerchPanel: NSPanel {
     override var canBecomeKey: Bool { true }
+
+    /// Perch never becomes the active app, so the panel may not be key when you
+    /// click it. Make it key first so the very first click reaches the control.
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .leftMouseDown, !isKeyWindow {
+            makeKey()
+        }
+        super.sendEvent(event)
+    }
 }
