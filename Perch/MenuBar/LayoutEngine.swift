@@ -365,6 +365,9 @@ final class LayoutEngine: ObservableObject {
         if let order = queued {
             // A drop during this pass replaces the batch; keep the new one.
             let members = queuedFrom, revision = queuedRevision
+            // Read now: a drop while this runs clears the flag, but this batch is still a respace.
+            let isRespace = respacing, pair = respacePair
+            if isRespace, let pair { respaced[pair] = Date() }
             func done() { if queuedRevision == revision { queued = nil } }
             if let plan = plan(order, in: current, members: members) {
                 if plan.writes.isEmpty {
@@ -376,7 +379,8 @@ final class LayoutEngine: ObservableObject {
                         current = await scan()
                     }
                     // Accessibility gone meanwhile: the new scan is empty, so go by the old one.
-                    setPriorities(order, in: permissions.hasAccessibility ? current : before, members: members)
+                    setPriorities(order, in: permissions.hasAccessibility ? current : before, members: members,
+                                  keepsPriorities: isRespace)
                     done()
                 } else if holdsMoves {
                     log.notice("\(plan.writes.count, privacy: .public) icons move when Arrange closes")
@@ -385,9 +389,7 @@ final class LayoutEngine: ObservableObject {
                     return true
                 } else {
                     waitsForClose = false
-                    // A respace held while Arrange was open counts from when it runs.
-                    if respacing, let pair = respacePair { respaced[pair] = Date() }
-                    await commit(plan, order, members: members, in: current)
+                    await commit(plan, order, members: members, keepsPriorities: isRespace, in: current)
                     done()
                     current = await scan()
                     // Accessibility can go while Control Center restarts.
@@ -552,10 +554,10 @@ final class LayoutEngine: ObservableObject {
         4 * Double(Float(abs(value)).ulp)
     }
 
-    /// When each pair of icons was last spread out, so one that spreading
-    /// didn't help doesn't restart Control Center over and over.
+    /// When each pair of icons was last spread out (when the batch ran), so
+    /// one that spreading didn't help doesn't restart Control Center over and over.
     private var respaced: [String: Date] = [:]
-    /// The pair a queued respace is for; its 10 minutes restart when it runs.
+    /// The pair a queued respace is for.
     private var respacePair: String?
 
     /// The icons on either side of where the divider has to go are saved too
@@ -577,7 +579,8 @@ final class LayoutEngine: ObservableObject {
             case .perch: return .perch
             case .fixed: return nil
             case .icon(let key):
-                guard let item = items.first(where: { $0.key == key }), item.isMovable, !staysPut(item) else { return nil }
+                // Ones that stay put too, where they are: they hold their place.
+                guard items.first(where: { $0.key == key })?.isMovable == true else { return nil }
                 return .icon(key)
             }
         }
@@ -599,7 +602,6 @@ final class LayoutEngine: ObservableObject {
             return false
         }
         log.notice("saved spots are too close for the divider; spreading \(plan.writes.count, privacy: .public) out")
-        respaced[pair] = Date()
         respacePair = pair
         respacing = true
         queuedFrom = members
@@ -757,7 +759,8 @@ final class LayoutEngine: ObservableObject {
     /// Saves the new spots and restarts Control Center once: on macOS 26 it
     /// draws every app's icons and puts each at its saved spot when it starts,
     /// so they move without their apps restarting. Then checks they landed.
-    private func commit(_ plan: Plan, _ order: [Spot], members: Set<String>, in items: [MenuBarItem]) async {
+    private func commit(_ plan: Plan, _ order: [Spot], members: Set<String>, keepsPriorities: Bool = false,
+                        in items: [MenuBarItem]) async {
         // All or nothing: if one spot can't be saved, put back the ones that
         // were, so the next restart (or login) doesn't apply half a move.
         var saved: [Plan.Write] = []
@@ -801,11 +804,11 @@ final class LayoutEngine: ObservableObject {
         guard permissions.hasAccessibility else {
             log.notice("Accessibility went away during a move; not checking it")
             // The spots are applied; keep which side each icon is on, too.
-            setPriorities(order, in: items, members: members)
+            setPriorities(order, in: items, members: members, keepsPriorities: keepsPriorities)
             return
         }
         let previous = Dictionary(uniqueKeysWithValues: members.map { ($0, preferences.priority(for: $0)) })
-        setPriorities(order, in: after, members: members)
+        setPriorities(order, in: after, members: members, keepsPriorities: keepsPriorities)
         // One that never came back can't be checked: treat it as out of place.
         let missing = saved.map(\.key).filter { key in !after.contains { $0.key == key && $0.isInMenuBar } }
         let wrong = missing + misplaced(order, in: after, moved: movedKeys, members: members)
@@ -835,8 +838,10 @@ final class LayoutEngine: ObservableObject {
     }
 
     /// Marks what's in `order` shown and the other icons that were part of it hidden.
-    private func setPriorities(_ order: [Spot], in items: [MenuBarItem], members: Set<String>? = nil) {
-        guard !respacing else { return }
+    /// `keepsPriorities`: a respace, which only saves spots again.
+    private func setPriorities(_ order: [Spot], in items: [MenuBarItem], members: Set<String>? = nil,
+                               keepsPriorities: Bool = false) {
+        guard !keepsPriorities else { return }
         let members = members ?? queuedFrom
         for item in items where item.isInMenuBar && item.isMovable && members.contains(item.key) {
             if staysPut(item) && !order.contains(.icon(item.key)) { continue }
