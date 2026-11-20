@@ -532,6 +532,32 @@ final class LayoutEngine: ObservableObject {
         var perch: Double?
     }
 
+    /// How far apart saved spots must be. macOS keeps them to about seven
+    /// significant digits, so ones closer than that become the same spot,
+    /// and nothing (not even the divider) fits between them.
+    private static func minimumGap(near value: Double) -> Double {
+        max(0.01, abs(value) * 1e-5)
+    }
+
+    private var lastRespace: Date?
+
+    /// Two icons on either side of where the divider has to go are saved too
+    /// close together for it to fit between them: save the bar's order again,
+    /// spread out. That's one Control Center restart (after Arrange closes).
+    private func respace(in items: [MenuBarItem]) {
+        // If spreading them didn't help, don't restart Control Center over and over.
+        guard queued == nil, Date().timeIntervalSince(lastRespace ?? .distantPast) > 600 else { return }
+        var members = Set(items.filter { $0.isInMenuBar && $0.isMovable }.map(\.key))
+        let order = withNewcomers(shownOrder(in: items), into: &members)
+        guard let plan = plan(order, in: items, members: members), !plan.writes.isEmpty else { return }
+        log.notice("saved spots are too close for the divider; spreading \(plan.writes.count, privacy: .public) out")
+        lastRespace = Date()
+        queuedFrom = members
+        queuedRevision += 1
+        queued = order
+        scheduleArrange(after: 0.02)
+    }
+
     /// The new spots that make the bar: hidden icons, then `order`, then the
     /// clock and Control Center. Nil if that can't be done.
     ///
@@ -597,6 +623,20 @@ final class LayoutEngine: ObservableObject {
         guard stay.filter({ !movable(sequence[$0]) }).count == fixedCount else {
             log.notice("icons Perch can't move would have to change order")
             return nil
+        }
+        // Where two that stay are too close together, or the ones going
+        // between them would be, move one that stays too, so the run spreads out.
+        var spreading = true
+        while spreading {
+            spreading = false
+            for (a, b) in zip(stay, stay.dropFirst()) {
+                guard let u = known(sequence[a]), let l = known(sequence[b]),
+                      (u - l) / Double(b - a) < Self.minimumGap(near: u) else { continue }
+                guard let drop = [b, a].first(where: { movable(sequence[$0]) }) else { continue }
+                stay.removeAll { $0 == drop }
+                spreading = true
+                break
+            }
         }
 
         var result = Plan()
@@ -882,6 +922,11 @@ final class LayoutEngine: ObservableObject {
             let afterLeft = leftOfCut.map { $0.x < divider.maxX } ?? true
             let beforeRight = rightOfCut.map { divider.maxX < $0.x } ?? true
             if afterLeft && beforeRight { return false }
+        }
+        if let left = leftOfCut, let right = rightOfCut, !left.isGuess, !right.isGuess,
+           let l = left.position, let r = right.position, l - r < Self.minimumGap(near: l) {
+            respace(in: items)
+            return false
         }
         guard let position = Self.between(leftOfCut, rightOfCut) else { return false }
         guard menuBar.moveDivider(to: position) else { return false }
