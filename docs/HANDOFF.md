@@ -45,6 +45,7 @@
 39. `perch-settings-gear`: a gear at the left end of Arrange opens Settings (right-click and ⌘, still work). The tour's Settings page points to it.
 40. `perch-long-bar`: Arrange is one strip (Hidden dimmed, a line, then the bar), and the line drags too (`commitSplit`: one `place` per icon it passed). Settings → Arrange picks Below the menu bar or Over the menu bar (`ArrangeStyle`; over uses `PanelController.topLeft` and `OverBarGeometry`, falls back to below beside a notch when the strip doesn't fit). The Turned off row is gone.
 41. `perch-guide`: the welcome tour is now the Guide: a topic list on the left (Accessibility shows a green or orange dot), pick any topic; Next steps through in order. Settings → Guide.
+42. `perch-live-activities`: Perch re-fits the bar when an icon right of the divider appears, goes or changes width (`MenuBarController.onBarChange`, from `NSWindow.didMoveNotification` on the divider's window, right edge only, ignored for 2 s after Perch moves its own items). Arrange shows Live Activities and the mic and camera dot pinned at the left of the bar side (not draggable, a tooltip explains).
 
 ## macOS 26 facts
 - Reading or writing another app's sandbox container (~/Library/Containers/<id>) triggers the "access data from other apps" prompt (kTCCServiceSystemPolicyAppData) and the call blocks until it's answered. Perch tells sandboxed apps by their code signature, never by touching the container.
@@ -62,6 +63,7 @@
 - AX hit test (`AXUIElementCopyElementAtPosition`) on empty menu bar space returns role AXMenuBar owned by the front app; app menus and icons return AXMenuBarItem. That's how Perch spots an empty-space click.
 - A collapsed divider is clamped to about 5,000 pt wide; its right edge is still where hidden icons end.
 - Nothing can be moved or captured while the screen is locked; Perch skips passes then.
+- Live Activities (`com.apple.controlcenter#<app>.liveActivity`) have no saved position. macOS always puts them just right of the divider, at the left end of the shown icons, so they can't be hidden or reordered. The only switch in System Settings is Notifications → "Allow Live Activities from iPhone", which covers iPhone ones, not a Mac app's.
 
 ## Testing
 Testing happens on a MacBook Pro with a notch, sometimes with an external display as the main one. Perch never sends synthetic clicks; test drags go through a temporary in-app hook that feeds mouse events to Perch's own Arrange window (never committed).

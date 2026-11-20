@@ -888,6 +888,9 @@ final class LayoutEngine: ObservableObject {
         // The first hide waits for a real pass, so it hides only what doesn't fit.
         menuBar.placeFirst = { [weak self] in await self?.arrange() ?? true }
         menuBar.onReady = { [weak self] in self?.scheduleArrange(after: 1) }
+        // A Live Activity came or went, or an icon changed width. Wait for it
+        // to finish animating; a pass that changes nothing moves nothing.
+        menuBar.onBarChange = { [weak self] in self?.scheduleArrange(after: 1.5) }
 
         preferences.$priorities
             .dropFirst()

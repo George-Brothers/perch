@@ -12,7 +12,7 @@ A light menu bar manager for macOS. Perch hides the menu bar icons you don't nee
 
 - **Click empty menu bar space for Perch's bar.** Every icon that's hidden or doesn't fit drops down in a small dark bar under the menu bar, easy to see over any window. Click one and its menu opens right there, like any menu, with Perch's bar still showing. Nothing moves in the menu bar (if an app's menu can't be copied, Perch shows its icons for a moment instead). Perch adds nothing to your bar unless you want it to: a thin line or an icon are options in Settings.
 - **Put every icon where you want it.** Arrange shows your menu bar as one strip: hidden icons dimmed left of a line, the menu bar's icons to its right, in order. Drag an icon anywhere, or drag the line, and Perch moves the real icons. Order is priority: when the bar is full, icons on the left wait in Hidden until there's room. Arrange opens under the menu bar, or over it if you prefer (Settings).
-- **Fits your screen.** On a laptop, icons that would land behind the notch go to Perch's bar instead, in your order.
+- **Fits your screen.** On a laptop, icons that would land behind the notch go to Perch's bar instead, in your order. When a Live Activity shows up or grows, Perch makes room right away by moving the leftmost icon to Perch's bar. macOS places Live Activities itself, so Arrange shows them pinned at the left end.
 - **Exact pictures (optional).** Perch's bar shows app icons, or with Screen Recording (in Settings), the icons exactly as they look.
 - **Spotlight.** Every menu bar icon (except Live Activities) shows up in Spotlight. Type its name and press Return to open its menu, even when it's hidden.
 - **Shortcuts.** Show Hidden Icons, Arrange Menu Bar and Open Menu Bar Icon actions.

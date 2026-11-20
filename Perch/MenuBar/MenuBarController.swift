@@ -76,6 +76,10 @@ final class MenuBarController: NSObject, ObservableObject {
     var openArrange: (() -> Void)?
     /// Called once Perch's items are placed, and again after a reset.
     var onReady: (() -> Void)?
+    /// Something right of the divider appeared, went or changed width: a Live
+    /// Activity, say, which macOS adds without any app launching. What fits
+    /// may have changed.
+    var onBarChange: (() -> Void)?
     /// Opens or closes Perch's bar. Returns false if it can't open (no Accessibility).
     var toggleDrawer: (() -> Bool)?
     /// Runs once at launch while everything is still showing, before the first hide.
@@ -127,6 +131,12 @@ final class MenuBarController: NSObject, ObservableObject {
     private var placementAttempts = 0
     private var hasReset = false
     private var barClickMonitor: Any?
+    private var dividerMoveObserver: NSObjectProtocol?
+    /// The divider's right edge when last seen, in screen points.
+    private var dividerRightEdge: CGFloat?
+    /// Perch just moved one of its own items; the bar is still settling, and
+    /// what moves until then is Perch's doing, not a new icon.
+    private var settlesAt = Date.distantPast
 
     init(preferences: Preferences) {
         self.preferences = preferences
@@ -337,6 +347,36 @@ final class MenuBarController: NSObject, ObservableObject {
             button.setAccessibilityLabel("Perch divider")
             button.toolTip = "Click to hide icons. Right-click to arrange."
         }
+        watchDivider()
+    }
+
+    /// How long the bar takes to finish sliding icons around after Perch moves an item.
+    private static let settleTime: TimeInterval = 2
+
+    /// macOS lines the icons up from the right, so the divider's right edge
+    /// moves only when the icons right of it change: one appears or goes, or
+    /// one changes width. Perch growing or shrinking the divider itself moves
+    /// its left edge, not this one. It costs nothing: AppKit reports it.
+    private func watchDivider() {
+        if let dividerMoveObserver { NotificationCenter.default.removeObserver(dividerMoveObserver) }
+        dividerMoveObserver = nil
+        // A new divider starts a new baseline.
+        dividerRightEdge = nil
+        settlesAt = Date().addingTimeInterval(Self.settleTime)
+        guard let window = hiddenDivider.button?.window else { return }
+        dividerMoveObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didMoveNotification, object: window, queue: .main
+        ) { [weak self, weak window] _ in
+            MainActor.assumeIsolated {
+                guard let self, let window else { return }
+                let edge = window.frame.maxX
+                defer { self.dividerRightEdge = edge }
+                guard Date() >= self.settlesAt,
+                      let last = self.dividerRightEdge, abs(edge - last) > 0.5 else { return }
+                self.log.debug("the icons right of the divider changed")
+                self.onBarChange?()
+            }
+        }
     }
 
     // MARK: - Moving Perch's own items
@@ -372,6 +412,7 @@ final class MenuBarController: NSObject, ObservableObject {
         guard perchPosition.map({ abs($0 - position) > 1e-6 }) ?? true else { return false }
         let old = perchItem
         Self.save(position, for: Autosave.switchPerch())
+        settlesAt = Date().addingTimeInterval(Self.settleTime)
         makePerchItem()
         if let old { NSStatusBar.system.removeStatusItem(old) }
         apply()
