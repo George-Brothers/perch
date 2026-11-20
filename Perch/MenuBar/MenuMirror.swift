@@ -212,7 +212,6 @@ enum MenuMirror {
         }
     }
 
-    /// Opens the real menu off screen again and presses the item at `path`.
     /// An item's title and shortcut: two items can share a title ("Disconnect")
     /// but not usually both. A checkmark isn't part of it; it flips.
     private nonisolated static func signature(_ element: AXUIElement) -> String {
@@ -222,18 +221,22 @@ enum MenuMirror {
         return "\(title)\u{1F}\(key)\u{1F}\(key.isEmpty ? 0 : modifiers)"
     }
 
-    /// The same plus the checkmark, for telling twins apart: if two
-    /// "Disconnect" rows swapped, only their checkmarks show it.
+    /// The same plus the checkmark and, for a submenu, what's in it, for
+    /// telling twins apart: if two "Disconnect" rows (or two "Connection"
+    /// submenus) swapped, only these show it.
     private nonisolated static func markedSignature(_ element: AXUIElement) -> String {
         let marked = !(AX.string(element, "AXMenuItemMarkChar") ?? "").isEmpty
-        return signature(element) + "\u{1F}" + (marked ? "1" : "0")
+        let submenu = AX.elements(element, kAXChildrenAttribute).first { AX.string($0, kAXRoleAttribute) == "AXMenu" }
+        let inside = submenu.map { AX.elements($0, kAXChildrenAttribute).map(signature).joined(separator: "\u{1E}") } ?? ""
+        return signature(element) + "\u{1F}" + (marked ? "1" : "0") + "\u{1F}" + inside
     }
 
+    /// Back to just the title and shortcut.
     private nonisolated static func unmarked(_ signature: String) -> String {
-        guard let end = signature.lastIndex(of: "\u{1F}") else { return signature }
-        return String(signature[..<end])
+        signature.split(separator: "\u{1F}", omittingEmptySubsequences: false).prefix(3).joined(separator: "\u{1F}")
     }
 
+    /// Opens the real menu off screen again and presses the item at `path`.
     private nonisolated static func press(path: [Int], titles: [String], levels: [[String]], in element: AXUIElement) {
         AXUIElementSetMessagingTimeout(element, 0.3)
         _ = AXUIElementPerformAction(element, kAXPressAction as CFString)

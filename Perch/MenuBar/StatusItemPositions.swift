@@ -207,7 +207,10 @@ enum AppRestarter {
         var saidWaiting = false
         while true {
             // A time in the future means the clock changed; don't wait on it.
-            if let started = lastRestart, Date().timeIntervalSince(started) >= 0,
+            // Count from Control Center's own launch too, in case it came back
+            // later than the last restart was watched for.
+            if let started = [lastRestart, running()?.launchDate].compactMap({ $0 }).max(),
+               Date().timeIntervalSince(started) >= 0,
                Date().timeIntervalSince(started) < 10.5 {
                 try? await Task.sleep(for: .seconds(10.5 - Date().timeIntervalSince(started)))
                 continue

@@ -29,7 +29,6 @@ final class LayoutEngine: ObservableObject {
     /// How many times in a row a pass waited for a menu or the mouse.
     private var deferrals = 0
 
-
     init(preferences: Preferences, permissions: Permissions, menuBar: MenuBarController) {
         // Moves no longer wait for an app's next launch; drop what older versions saved.
         UserDefaults.standard.removeObject(forKey: "pendingMoves")
@@ -350,12 +349,14 @@ final class LayoutEngine: ObservableObject {
             if let plan = plan(order, in: current, members: members) {
                 if plan.writes.isEmpty {
                     // Only the divider and Perch's own items move: right away.
+                    let before = current
                     if let position = plan.perch {
                         menuBar.movePerch(to: position)
                         await menuBar.settle()
                         current = await scan()
                     }
-                    setPriorities(order, in: current, members: members)
+                    // Accessibility gone meanwhile: the new scan is empty, so go by the old one.
+                    setPriorities(order, in: permissions.hasAccessibility ? current : before, members: members)
                     done()
                 } else if holdsMoves {
                     log.notice("\(plan.writes.count, privacy: .public) icons move when Arrange closes")
@@ -822,13 +823,7 @@ final class LayoutEngine: ObservableObject {
         // Room between the notch (or the middle of the screen, where app menus
         // can reach on screens without one) and the clock and Control Center.
         let leftBound = screen.auxiliaryTopRightArea?.minX ?? screen.frame.midX
-        // Icon frames are top-down from the main screen; check both directions
-        // so a display stacked above or below doesn't count.
-        let top = (NSScreen.screens.first?.frame.height ?? 0) - screen.frame.maxY
-        let onScreen = { (item: MenuBarItem) in
-            screen.frame.minX <= item.frame.minX && item.frame.minX < screen.frame.maxX
-                && item.frame.minY > top - 60 && item.frame.minY < top + screen.frame.height
-        }
+        let onScreen = { (item: MenuBarItem) in MenuBarGeometry.isInMenuBar(item.frame, of: screen) }
         let rightBound = inBar.filter { $0.isFixed && onScreen($0) }.map(\.frame.minX).min() ?? screen.frame.maxX
         // Icons macOS places itself (the mic indicator) take room too.
         let reserved = inBar
@@ -963,10 +958,11 @@ final class LayoutEngine: ObservableObject {
         // Background-only helpers can't have icons; they're skipped.
         appsObservation = NSWorkspace.shared.observe(\.runningApplications, options: [.old, .new]) { [weak self] _, change in
             let changed = (change.newValue ?? []) + (change.oldValue ?? [])
-            // Control Center restarting is Perch's own doing; XPC helpers have no icons.
+            // Control Center restarting is Perch's own doing; XPC services and
+            // extensions (web content, view services) come and go and have no icons.
             guard changed.contains(where: {
                 $0.activationPolicy != .prohibited && $0.bundleIdentifier != "com.apple.controlcenter"
-                    && !($0.bundleURL?.path.contains(".xpc/") ?? false)
+                    && !["xpc", "appex"].contains($0.bundleURL?.pathExtension ?? "")
             }) else { return }
             DispatchQueue.main.async {
                 MainActor.assumeIsolated { self?.scheduleArrange(after: 3) }

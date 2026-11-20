@@ -275,7 +275,7 @@ struct ArrangeBar: View {
                 let p = value.location
                 let mouse = NSEvent.mouseLocation
                 let inWindow = NSApp.windows.contains {
-                    $0.isVisible && $0.frame.insetBy(dx: -40, dy: -height).contains(mouse)
+                    $0 is PerchPanel && $0.isVisible && $0.frame.insetBy(dx: -40, dy: -height).contains(mouse)
                 }
                 guard inWindow, p.y > -height, p.y < height * 2, p.x > -40, p.x < stripWidth + 40 else {
                     arrangeLog.debug("dropped outside Arrange; nothing moves")
@@ -697,7 +697,7 @@ struct ArrangePanelView: View {
             } else {
                 Color.clear.frame(height: geometry.barHeight)
                 // Right-aligned to the band's end, so it must fit left of it.
-                below(room: min(engine.barScreenWidth, geometry.bandEnd) - 80)
+                below(room: max(200, min(engine.barScreenWidth, geometry.bandEnd) - 80))
                     .frame(width: geometry.bandEnd, alignment: .trailing)
             }
         }

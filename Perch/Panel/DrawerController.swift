@@ -14,8 +14,8 @@ final class DrawerController {
     private var outsideClickMonitor: Any?
     private var keyMonitor: Any?
     private var resizeObserver: NSObjectProtocol?
-    /// Bumped on every open, so a fade-out that finishes late doesn't hide a reopened drawer.
-    /// Counts openings, so a click from an earlier opening can tell it's stale.
+    /// Bumped on every open, so a fade-out that finishes late doesn't hide a
+    /// reopened drawer, and a click from an earlier opening can tell it's stale.
     private(set) var generation = 0
 
     /// Opens the icon's own menu with its top-left corner at the point, and

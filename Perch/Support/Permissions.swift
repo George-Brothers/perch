@@ -67,8 +67,13 @@ final class Permissions: ObservableObject {
         }
     }
 
+    private var isRelaunching = false
+
     /// macOS applies a new Screen Recording grant only after the app restarts.
     func relaunch() {
+        // A second click while a move finishes: just quit, don't start a second copy.
+        guard !isRelaunching else { NSApp.terminate(nil); return }
+        isRelaunching = true
         let path = Bundle.main.bundlePath
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/bin/sh")

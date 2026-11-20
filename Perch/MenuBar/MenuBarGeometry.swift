@@ -2,6 +2,15 @@ import AppKit
 
 /// Cheap, on-demand questions about the menu bar. Nothing here runs on a timer.
 enum MenuBarGeometry {
+    /// Whether an icon's frame (top-down from the main screen, as Accessibility
+    /// gives it) is in this screen's menu bar, including one auto-hidden above
+    /// it. Checks both directions, so a display stacked above or below doesn't count.
+    static func isInMenuBar(_ frame: CGRect, of screen: NSScreen) -> Bool {
+        let top = (NSScreen.screens.first?.frame.height ?? 0) - screen.frame.maxY
+        return screen.frame.minX <= frame.minX && frame.minX < screen.frame.maxX
+            && frame.minY > top - 60 && frame.minY < top + menuBarHeight(for: screen) + 4
+    }
+
     static func menuBarHeight(for screen: NSScreen) -> CGFloat {
         max(
             NSStatusBar.system.thickness,

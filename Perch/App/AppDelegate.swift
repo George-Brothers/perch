@@ -240,7 +240,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let screen = menuBar.screen else { return nil }
         let left = screen.frame.minX
         let fixed = engine.items.filter {
-            $0.isInMenuBar && $0.isFixed && $0.frame.minX >= left && $0.frame.minX < screen.frame.maxX
+            $0.isInMenuBar && $0.isFixed && MenuBarGeometry.isInMenuBar($0.frame, of: screen)
         }
         return OverBarGeometry(
             width: screen.frame.width,
@@ -328,7 +328,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// doesn't also show Settings.
     private var openedFromSpotlight: Date?
 
-    /// A move that's under way finishes before Perch quits (up to 25 s): its
+    /// A move that's under way finishes before Perch quits (25 s unlocked, two minutes at most): its
     /// new spots are already saved, and quitting midway would leave them for
     /// the next restart to apply unchecked. Closing Arrange lets held moves go.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -337,11 +337,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Without Accessibility, held moves can't run; don't wait on them.
         let canFinish = engine.isArranging || (engine.hasQueuedMoves && Permissions.shared.hasAccessibility)
         guard canFinish else { return .terminateNow }
+        // Logging out, restarting or shutting down: don't hold that up. The
+        // saved spots apply when Control Center starts again.
+        let reason = NSAppleEventManager.shared().currentAppleEvent?.attributeDescriptor(forKeyword: kAEQuitReason)
+        guard reason == nil else { return .terminateNow }
         isQuitting = true
         Task { @MainActor in
-            // Time spent locked doesn't count: the move is waiting for the unlock.
+            // Time spent locked doesn't count (the move is waiting for the
+            // unlock), but give up after two minutes regardless.
             var waited = 0
-            while waited < 125, engine.isArranging || engine.hasQueuedMoves {
+            let started = Date()
+            while waited < 125, Date().timeIntervalSince(started) < 120,
+                  engine.isArranging || (engine.hasQueuedMoves && Permissions.shared.hasAccessibility) {
                 try? await Task.sleep(for: .milliseconds(200))
                 if !AppRestarter.screenIsLocked { waited += 1 }
             }
