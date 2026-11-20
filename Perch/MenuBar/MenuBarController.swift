@@ -559,13 +559,18 @@ final class MenuBarController: NSObject, ObservableObject {
     }
 
     /// Whether a frame (top-left origin) sits along the top of a screen, or
-    /// just above it when the menu bar hides itself. (Before it's placed, a
-    /// new item sits at the bottom of the screen.)
+    /// just above it when the menu bar hides itself, with its right edge on
+    /// that screen. Before it's placed, a new item sits at x = 0 just below
+    /// the main screen, which is where a display stacked below has its menu
+    /// bar; no placed item is ever at x = 0 (the Apple menu is there), so that
+    /// one spot doesn't count. Next it sits off screen to the left.
     private static func isOnMenuBar(_ frame: CGRect) -> Bool {
+        guard frame.minX != 0 else { return false }
         let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
         return NSScreen.screens.contains {
             let top = primaryHeight - $0.frame.maxY
             return frame.minY > top - 60 && frame.minY < top + 2
+                && frame.maxX > $0.frame.minX && frame.maxX <= $0.frame.maxX + 1
         }
     }
 
