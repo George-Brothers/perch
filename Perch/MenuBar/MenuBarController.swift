@@ -54,7 +54,9 @@ final class MenuBarController: NSObject, ObservableObject {
     var beforeFirstHide: (() async -> Void)?
     var openSearch: (() -> Void)?
     /// The search shortcut, shown in the right-click menu.
-    var searchShortcutTitle: (() -> String?)?
+    var searchShortcut: (() -> Shortcut?)?
+    /// Whether the bird opens the drawer rather than showing icons in the bar.
+    var usesDrawer: () -> Bool = { false }
 
     var perchButton: NSStatusBarButton? { perchItem.button }
 
@@ -88,12 +90,16 @@ final class MenuBarController: NSObject, ObservableObject {
     }
 
     func reveal(armAutoHide: Bool = true) {
+        stopMenuWatch()
+        isTemporaryReveal = false
         visibility = .revealed
         apply()
         if armAutoHide { rehider.arm() } else { rehider.disarm() }
     }
 
     func collapse() {
+        stopMenuWatch()
+        isTemporaryReveal = false
         rehider.disarm()
         guard perchIsRightOfDivider() else {
             // The bird ended up on the hidden side, so hiding would hide Perch
@@ -114,40 +120,75 @@ final class MenuBarController: NSObject, ObservableObject {
         apply()
     }
 
-    /// Opens another app's icon from the Arrange list. Hidden icons are revealed
-    /// first, so their menu opens in the right place.
-    func open(_ item: MenuBarItem) {
-        guard !isBusy else { return }
-        let needsReveal = item.section == .hidden && !visibility.isRevealed
-        if needsReveal { reveal() }
-        DispatchQueue.main.asyncAfter(deadline: .now() + (needsReveal ? 0.3 : 0.05)) {
-            ItemOpener.open(item)
-        }
-    }
+    /// True while the bar is out only for an icon opened from the drawer or
+    /// search, so Perch hides it again when that icon's menu closes.
+    private(set) var isTemporaryReveal = false
 
     /// Opens a hidden icon picked from the drawer or search: shows the hidden icons just
     /// long enough for its menu, then hides them again when the menu closes.
-    func openTemporarily(_ item: MenuBarItem) {
-        guard !isBusy else { return }
-        let wasRevealed = visibility.isRevealed
-        if !wasRevealed {
+    /// Returns false when Perch is busy arranging and can't open it now.
+    @discardableResult
+    func openTemporarily(_ item: MenuBarItem) -> Bool {
+        guard !isBusy else { return false }
+        // A newer open replaces an older one that hasn't finished.
+        stopMenuWatch()
+        if !visibility.isRevealed {
             visibility = .revealed
             apply()
             rehider.disarm()
+            isTemporaryReveal = true
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
-            guard let self else { return }
-            // Re-read the icon now that it's on screen.
-            ItemOpener.open(item)
-            if !wasRevealed { self.collapseWhenMenuCloses() }
+        pendingOpen += 1
+        let request = pendingOpen
+        let isCurrent = { [weak self] in
+            guard let self else { return false }
+            return self.pendingOpen == request && self.visibility.isRevealed && !self.isBusy
+        }
+        // Its menu opens wherever the icon is, so wait until it's on screen.
+        whenOnScreen(item, attempts: 20) { [weak self] onScreen in
+            guard let self, isCurrent() else { return }
+            guard onScreen else {
+                self.log.notice("\(item.displayName, privacy: .public) didn't come on screen; not opening it")
+                if self.isTemporaryReveal { self.collapse() }
+                return
+            }
+            ItemOpener.open(item, if: isCurrent)
+            if self.isTemporaryReveal { self.collapseWhenMenuCloses() }
+        }
+        return true
+    }
+
+    /// The latest `openTemporarily` request; older ones that are still waiting give up.
+    private var pendingOpen = 0
+
+    /// Calls `action(true)` once the icon has moved on screen, checking every
+    /// 50 ms for up to `attempts` tries, or `action(false)` if it never does.
+    private func whenOnScreen(_ item: MenuBarItem, attempts: Int, _ action: @escaping (Bool) -> Void) {
+        let onScreen = AX.frame(of: item.element).map { MenuBarGeometry.isOnScreen($0, screen: screen) } ?? false
+        if onScreen {
+            // A moment more for the move to settle.
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(80))
+                action(true)
+            }
+            return
+        }
+        guard attempts > 0 else { return action(false) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            self?.whenOnScreen(item, attempts: attempts - 1, action)
         }
     }
 
     private var menuWatch: Timer?
 
+    private func stopMenuWatch() {
+        menuWatch?.invalidate()
+        menuWatch = nil
+    }
+
     /// Checks twice a second while the opened menu is up, and only then.
     private func collapseWhenMenuCloses() {
-        menuWatch?.invalidate()
+        stopMenuWatch()
         var checks = 0
         var sawMenu = false
         let timer = Timer(timeInterval: 0.4, repeats: true) { [weak self] timer in
@@ -158,8 +199,7 @@ final class MenuBarController: NSObject, ObservableObject {
                 sawMenu = sawMenu || open
                 // Done when the menu closed, or if none ever opened, or after 2 minutes.
                 if (!open && (sawMenu || checks >= 5)) || checks > 300 {
-                    timer.invalidate()
-                    self.menuWatch = nil
+                    self.stopMenuWatch()
                     if self.visibility.isRevealed, !self.isBusy { self.collapse() }
                 }
             }
@@ -329,8 +369,8 @@ final class MenuBarController: NSObject, ObservableObject {
             showMenu()
         } else if event?.modifierFlags.contains(.option) == true {
             openArrange?(perchItem.button)
-        } else if toggleDrawer?() != true {
-            toggle()
+        } else {
+            menuToggle()
         }
     }
 
@@ -341,11 +381,15 @@ final class MenuBarController: NSObject, ObservableObject {
 
     private func showMenu() {
         let menu = NSMenu()
-        let toggleTitle = visibility.isRevealed ? "Hide Icons" : "Show Hidden Icons"
+        let toggleTitle = visibility.isRevealed ? "Hide Icons" : (usesDrawer() ? "Show Drawer" : "Show Hidden Icons")
         menu.addItem(withTitle: toggleTitle, action: #selector(menuToggle), keyEquivalent: "").target = self
         let search = menu.addItem(withTitle: "Search Icons…", action: #selector(menuSearch), keyEquivalent: "")
         search.target = self
-        if let shortcut = searchShortcutTitle?() { search.toolTip = shortcut }
+        if let shortcut = searchShortcut?(), let key = shortcut.keyEquivalent {
+            // Shown the way macOS menus show shortcuts.
+            search.keyEquivalent = key
+            search.keyEquivalentModifierMask = shortcut.modifiers
+        }
         menu.addItem(withTitle: "Arrange Icons…", action: #selector(menuArrange), keyEquivalent: "").target = self
         menu.addItem(.separator())
         menu.addItem(withTitle: "Settings…", action: #selector(menuSettings), keyEquivalent: ",").target = self
@@ -357,8 +401,10 @@ final class MenuBarController: NSObject, ObservableObject {
         perchItem.menu = nil
     }
 
+    /// With the bar already showing everything, a click hides it again
+    /// rather than opening the drawer on top.
     @objc private func menuToggle() {
-        if toggleDrawer?() != true { toggle() }
+        if visibility.isRevealed || toggleDrawer?() != true { toggle() }
     }
     @objc private func menuSearch() { openSearch?() }
     @objc private func menuArrange() { openArrange?(perchItem.button) }

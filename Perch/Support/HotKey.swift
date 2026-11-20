@@ -18,6 +18,13 @@ struct Shortcut: Equatable {
         return flags
     }
 
+    /// The key as an `NSMenuItem` key equivalent, when it has one.
+    var keyEquivalent: String? {
+        if Int(keyCode) == kVK_Space { return " " }
+        let name = Self.keyName(keyCode)
+        return name.count == 1 && name != "?" ? name.lowercased() : nil
+    }
+
     /// How macOS menus write it, like ⌥⇧Space.
     var displayString: String {
         var text = ""
@@ -43,8 +50,13 @@ struct Shortcut: Equatable {
         }
         if let number = functionKeys[Int(code)] { return "F\(number)" }
         // Ask the current keyboard layout what the key types.
-        guard let source = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue(),
-              let data = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData)
+        // Input methods such as Pinyin have no layout of their own; fall back to
+        // the keyboard underneath them.
+        let layoutData = { (source: TISInputSource?) in
+            source.flatMap { TISGetInputSourceProperty($0, kTISPropertyUnicodeKeyLayoutData) }
+        }
+        guard let data = layoutData(TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue())
+            ?? layoutData(TISCopyCurrentASCIICapableKeyboardLayoutInputSource()?.takeRetainedValue())
         else { return "?" }
         let layout = unsafeBitCast(data, to: CFData.self)
         var deadKeys: UInt32 = 0

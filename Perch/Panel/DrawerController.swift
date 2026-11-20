@@ -13,6 +13,8 @@ final class DrawerController {
     private var outsideClickMonitor: Any?
     private var keyMonitor: Any?
     private var resizeObserver: NSObjectProtocol?
+    /// Bumped on every open, so a fade-out that finishes late doesn't hide a reopened drawer.
+    private var generation = 0
 
     /// Opens the icon's own menu. Set by the app.
     var onOpenItem: ((MenuBarItem) -> Void)?
@@ -24,7 +26,8 @@ final class DrawerController {
         self.preferences = preferences
     }
 
-    var isOpen: Bool { panel?.isVisible == true }
+    /// False as soon as closing starts, so a click during the fade reopens it.
+    private(set) var isOpen = false
 
     func toggle(anchor: NSStatusBarButton?) {
         isOpen ? close() : open(anchor: anchor)
@@ -34,9 +37,13 @@ final class DrawerController {
         self.anchor = anchor
         let panel = self.panel ?? makePanel()
         self.panel = panel
+        generation += 1
+        isOpen = true
         position(panel)
         panel.alphaValue = 0
         panel.orderFrontRegardless()
+        panel.makeKey() // for Escape
+        MenuBarGeometry.ignoredWindowNumbers.insert(panel.windowNumber)
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.12
             panel.animator().alphaValue = 1
@@ -49,13 +56,18 @@ final class DrawerController {
     }
 
     func close() {
-        guard let panel, panel.isVisible else { return }
+        guard isOpen, let panel else { return }
+        isOpen = false
         removeMonitors()
+        let closing = generation
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.1
             panel.animator().alphaValue = 0
-        } completionHandler: {
-            MainActor.assumeIsolated { panel.orderOut(nil) }
+        } completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                guard self?.generation == closing else { return }
+                panel.orderOut(nil)
+            }
         }
     }
 
@@ -85,7 +97,8 @@ final class DrawerController {
             onArrange: { [weak self] in
                 self?.close()
                 self?.onOpenArrange?()
-            }
+            },
+            onClose: { [weak self] in self?.close() }
         )
         let hosting = NSHostingController(rootView: view)
         hosting.sizingOptions = [.preferredContentSize]
@@ -109,7 +122,7 @@ final class DrawerController {
         guard let screen = anchor?.window?.screen ?? NSScreen.main else { return }
         let barBottom = screen.frame.maxY - MenuBarGeometry.menuBarHeight(for: screen)
         let visible = screen.frame
-        var x = (anchorFrame?.maxX ?? visible.maxX - 8) - size.width + 8
+        var x = (anchorFrame?.maxX ?? visible.maxX - 8) - size.width + 1
         x = min(max(x, visible.minX + 8), visible.maxX - size.width - 8)
         let origin = NSPoint(x: x.rounded(), y: (barBottom - 5 - size.height).rounded())
         if panel.frame.origin != origin {
@@ -149,6 +162,7 @@ struct DrawerView: View {
     @ObservedObject var preferences: Preferences
     let onOpen: (MenuBarItem) -> Void
     let onArrange: () -> Void
+    let onClose: () -> Void
 
     private var hidden: [MenuBarItem] {
         engine.items.filter { $0.section == .hidden }.sorted { $0.frame.minX < $1.frame.minX }
@@ -158,7 +172,7 @@ struct DrawerView: View {
         HStack(spacing: 0) {
             if hidden.isEmpty {
                 Text(engine.hasScanned ? "No hidden icons" : " ")
-                    .font(.system(size: 12))
+                    .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 10)
             } else {
@@ -173,7 +187,7 @@ struct DrawerView: View {
         .padding(.vertical, 2)
         .background(.regularMaterial, in: Capsule(style: .continuous))
         .overlay(Capsule(style: .continuous).strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5))
-        .environment(\.colorScheme, images.iconsAreLight ? .dark : .light)
+        .modifier(MatchIconColors(images: images, active: hidden.contains { images.image(for: $0) != nil }))
         .fixedSize()
         .padding(1)
     }
@@ -182,10 +196,29 @@ struct DrawerView: View {
     private func priorityMenu(for item: MenuBarItem) -> some View {
         Text(item.displayName)
         Divider()
-        Button("Keep in Menu Bar") { engine.setPriority(.always, for: item) }
-        Button("Show When There's Room") { engine.setPriority(.auto, for: item) }
+        ForEach([IconPriority.always, .auto]) { priority in
+            Button(priority.menuTitle) {
+                onClose()
+                engine.setPriority(priority, for: item)
+            }
+        }
         Divider()
         Button("Arrange Icons…", action: onArrange)
+    }
+}
+
+/// Pictures of icons are drawn for the menu bar behind them, so give the drawer
+/// the same light or dark look. With no pictures yet, follow the system.
+struct MatchIconColors: ViewModifier {
+    @ObservedObject var images: IconImages
+    let active: Bool
+
+    func body(content: Content) -> some View {
+        if active {
+            content.environment(\.colorScheme, images.iconsAreLight ? .dark : .light)
+        } else {
+            content
+        }
     }
 }
 
@@ -199,8 +232,13 @@ private struct DrawerIcon: View {
         Button { onOpen(item) } label: {
             Group {
                 if let image {
+                    // Notched displays have a taller bar; keep the drawer slim anyway.
                     Image(nsImage: image)
+                        .resizable()
                         .interpolation(.high)
+                        .aspectRatio(contentMode: .fit)
+                        .frame(height: min(image.size.height, 24))
+                        .frame(minWidth: 26)
                 } else {
                     ItemIcon(item: item)
                         .frame(width: 18, height: 18)
@@ -217,5 +255,6 @@ private struct DrawerIcon: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .help(item.displayName)
+        .accessibilityLabel(item.displayName)
     }
 }

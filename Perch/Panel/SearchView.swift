@@ -123,7 +123,7 @@ private struct SearchRow: View {
             if item.section == .hidden {
                 Text("Hidden")
                     .font(.system(size: 11))
-                    .foregroundStyle(selected ? Color.white.opacity(0.8) : Color.secondary)
+                    .foregroundStyle(selected ? Color.white.opacity(0.75) : Color(nsColor: .tertiaryLabelColor))
             }
         }
         .foregroundStyle(selected ? Color.white : Color.primary)

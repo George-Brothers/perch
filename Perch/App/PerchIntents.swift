@@ -37,8 +37,12 @@ struct OpenIconIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        _ = await AppDelegate.shared?.openIcon(key: icon.id)
-        return .result()
+        switch await AppDelegate.shared?.openIcon(key: icon.id) {
+        case .opened: return .result()
+        case .busy: throw OpenFailed.busy
+        case .noPermission: throw OpenFailed.noPermission
+        case .gone, nil: throw OpenFailed.gone
+        }
     }
 }
 
@@ -95,5 +99,22 @@ struct PerchShortcuts: AppShortcutsProvider {
             shortTitle: "Open Menu Bar Icon",
             systemImageName: "menubar.rectangle"
         )
+    }
+}
+
+private enum OpenFailed: Error, CustomLocalizedStringResourceConvertible {
+    /// The icon's app quit or removed it since Shortcuts last looked.
+    case gone
+    /// Perch is moving icons right now.
+    case busy
+    /// Perch hasn't been allowed Accessibility yet.
+    case noPermission
+
+    var localizedStringResource: LocalizedStringResource {
+        switch self {
+        case .gone: "That icon isn't in the menu bar anymore."
+        case .busy: "Perch is arranging icons. Try again in a moment."
+        case .noPermission: "Perch needs Accessibility permission. Open Perch to allow it."
+        }
     }
 }

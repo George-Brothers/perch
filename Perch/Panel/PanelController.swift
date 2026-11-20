@@ -31,11 +31,12 @@ final class PanelController {
         self.anchor = anchor
         let panel = self.panel ?? makePanel()
         self.panel = panel
-        if let onOpen { onOpen() } else { model.refresh() }
         position(panel)
         panel.orderFrontRegardless()
         panel.makeKey()
-        MenuBarGeometry.ignoredWindowNumber = panel.windowNumber
+        // After the panel is key, so a text field in it can take focus.
+        if let onOpen { onOpen() } else { model.refresh() }
+        MenuBarGeometry.ignoredWindowNumbers.insert(panel.windowNumber)
         installMonitors()
     }
 

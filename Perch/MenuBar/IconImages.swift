@@ -9,6 +9,9 @@ import os
 /// Perch captures them whenever the bar is showing everything (at launch, after
 /// arranging, when you show hidden icons) and keeps the last picture of each.
 /// Never on a timer.
+///
+/// Each capture makes macOS flash its purple screen-recording dot, so Perch only
+/// captures icons that are new, changed size, or haven't been pictured for a while.
 @MainActor
 final class IconImages: ObservableObject {
     /// Picture per `MenuBarItem.key`, at the icon's size in points.
@@ -18,27 +21,78 @@ final class IconImages: ObservableObject {
 
     private let log = Logger(subsystem: "com.georgebrothers.perch", category: "images")
     private var isCapturing = false
+    /// When each icon was pictured, and how wide it was then.
+    private var captured: [String: (date: Date, width: CGFloat)] = [:]
+    private static let maxAge: TimeInterval = 30 * 60
+
+    /// True when the icon has no picture, its picture is a different size, or it's old.
+    func needsCapture(_ item: MenuBarItem) -> Bool {
+        guard images[item.key] != nil, let last = captured[item.key] else { return true }
+        let sizeChanged = abs(last.width - item.frame.width) > 1
+        return sizeChanged || Date().timeIntervalSince(last.date) > Self.maxAge
+    }
 
     func image(for item: MenuBarItem) -> NSImage? { images[item.key] }
 
-    /// Captures the given icons. Cheap enough to run each time the drawer opens.
+    /// Rescans and pictures whatever needs it, following all of Perch's rules
+    /// (drawer on, permission, no menu open). Set by the app; Settings calls it.
+    var refresh: (() async -> Void)?
+
+    private var themeObserver: NSObjectProtocol?
+
+    init() {
+        // Light/Dark mode redraws every icon: retake all pictures next time
+        // they're on screen, keeping the old ones until then.
+        themeObserver = DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name("AppleInterfaceThemeChangedNotification"), object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.themeCount += 1
+                self?.captured.removeAll()
+            }
+        }
+    }
+
+    /// Returns once no capture is running.
+    func waitUntilIdle() async {
+        while isCapturing { try? await Task.sleep(for: .milliseconds(50)) }
+    }
+
+    /// Bumped by `clear()`, so a capture already running can't bring pictures back.
+    private var clearCount = 0
+    /// Bumped on each Light/Dark switch.
+    private var themeCount = 0
+
+    func clear() {
+        clearCount += 1
+        images = [:]
+        captured = [:]
+        iconsAreLight = false
+    }
+
+    /// Captures the given icons that are on screen right now.
     func capture(_ items: [MenuBarItem]) async {
         guard !items.isEmpty, !isCapturing, CGPreflightScreenCaptureAccess() else { return }
+        let session = clearCount
+        let theme = themeCount
         isCapturing = true
         defer { isCapturing = false }
 
         let content: SCShareableContent
         do {
-            content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+            content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         } catch {
             log.error("couldn't list windows: \(error.localizedDescription, privacy: .public)")
             return
         }
+        // Turned the drawer off while windows were listed: take no pictures.
+        guard session == clearCount else { return }
         let statusLevel = Int(CGWindowLevelForKey(.statusWindow))
         let barWindows = content.windows.filter { $0.windowLayer == statusLevel }
 
         // Pair each icon with the window that holds it.
         var jobs: [(key: String, window: SCWindow)] = []
+        let widths = Dictionary(items.map { ($0.key, $0.frame.width) }, uniquingKeysWith: { a, _ in a })
         for item in items {
             let mid = CGPoint(x: item.frame.midX, y: item.frame.midY)
             let match = barWindows
@@ -47,9 +101,15 @@ final class IconImages: ObservableObject {
             if let match { jobs.append((item.key, match)) }
         }
 
-        let scale = NSScreen.main?.backingScaleFactor ?? 2
-        let captured = await withTaskGroup(of: (String, NSImage)?.self) { group in
+        let pictures = await withTaskGroup(of: (String, NSImage)?.self) { group in
             for job in jobs {
+                // SCWindow frames use a top-left origin on the primary display.
+                let primaryTop = NSScreen.screens.first?.frame.maxY ?? 0
+                let mid = CGPoint(x: job.window.frame.midX, y: job.window.frame.midY)
+                let scale = NSScreen.screens.first { screen in
+                    CGRect(x: screen.frame.minX, y: primaryTop - screen.frame.maxY,
+                           width: screen.frame.width, height: screen.frame.height).contains(mid)
+                }?.backingScaleFactor ?? 2
                 group.addTask {
                     let config = SCStreamConfiguration()
                     config.width = Int(job.window.frame.width * scale)
@@ -69,21 +129,30 @@ final class IconImages: ObservableObject {
             return result
         }
 
-        guard !captured.isEmpty else {
+        guard !pictures.isEmpty else {
             log.notice("no icons captured")
             return
         }
+        // Turned the drawer off meanwhile: drop what came back.
+        guard session == clearCount else { return }
+        // Light/Dark mode changed meanwhile: keep the pictures, but retake them next time.
+        let fresh = theme == themeCount
         var updated = images
-        for (key, image) in captured { updated[key] = image }
+        let now = Date()
+        for (key, image) in pictures {
+            updated[key] = image
+            if fresh { captured[key] = (now, widths[key] ?? image.size.width) }
+        }
         images = updated
-        iconsAreLight = Self.averageLuminance(of: captured.map(\.1)) > 0.6
+        // Judge from every picture, so one colorful new icon can't flip the look.
+        iconsAreLight = Self.averageLuminance(of: Array(updated.values)) > 0.6
     }
 
     /// Average brightness of the drawn (non-transparent) pixels, 0 to 1.
     private static func averageLuminance(of images: [NSImage]) -> Double {
         var total = 0.0
         var weight = 0.0
-        for image in images.prefix(8) {
+        for image in images {
             guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
                   let rep = Optional(NSBitmapImageRep(cgImage: cg))
             else { continue }

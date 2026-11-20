@@ -98,6 +98,11 @@ final class Preferences: ObservableObject {
         }
     }
 
+    /// Not saved: true while Settings is recording a new shortcut, so the old
+    /// one doesn't fire, and true when another app already owns the shortcut.
+    @Published var isRecordingShortcut = false
+    @Published var searchShortcutTaken = false
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         defaults.register(defaults: [

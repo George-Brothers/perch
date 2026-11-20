@@ -1,10 +1,13 @@
 # Perch feature spec
 
-Perch is a light menu bar manager for macOS. It aims to do most of what Bartender does without its weight.
+Perch is a light menu bar manager for macOS. The goal: the menu bar macOS should have shipped. Small, crisp, and it just works.
 
-## The rule: do nothing until something changes
+## The rules
 
-Perch never polls the menu bar on a timer and never takes screenshots in the background. It reacts only to events macOS already sends: an app launching or quitting, a display connecting, Wi-Fi changing, the Mac waking, the mic turning on.
+1. **Do nothing until something changes.** No timers, no background screenshots. Perch reacts to what macOS already announces: an app opening or quitting, a display change, wake, unlock, a click.
+2. **Improve the menu bar, never take from it.** Perch's own footprint is one small icon and a hairline divider.
+3. **No surprise permissions.** Accessibility is required. Screen Recording is opt-in, behind a switch, with an explanation first.
+4. **Never fight the user.** Perch waits while you use the mouse or a menu, and gives up on an icon it can't move instead of retrying it.
 
 **Performance budget (each PR is checked against it):**
 
@@ -12,74 +15,30 @@ Perch never polls the menu bar on a timer and never takes screenshots in the bac
 |---|---|
 | CPU while idle | about 0% |
 | Memory while idle | under 30 MB |
-| Opening the dropdown | under 0.2 s |
-| Moving your cursor on its own | never |
-| Screenshots of icons | only while the dropdown is open, then cached |
+| Opening the drawer, Arrange or search | under 0.2 s |
+| Icon pictures | only for icons that are new, changed size, or 30 min old (each capture flashes the purple dot) |
 
-## Features
+## Built
 
-### 1. Core hiding
-- **Three sections:** Shown, Hidden and Archived. Archived icons never appear in the bar, only in Perch.
-- **Reveal:** click the Perch icon, click an empty part of the menu bar, scroll or swipe on the bar, hover, or press a hotkey. Click-only is the default; hover is opt-in.
-- **Auto-rehide:** after a delay, on a click outside the menu bar, or on an app switch. Never while a menu is open.
-- **Clean mode:** one hotkey hides everything, for screenshots and screen shares.
-
-### 2. Layout
-- **Drag-and-drop dropdown:** reorder icons and move them between sections; the real menu bar follows.
-- **Moves happen in one pass, only when you ask.** No constant re-arranging.
-- **Layout guard:** Perch remembers your exact order and puts it back when macOS or an app update reshuffles it.
-- **New icon rule:** a new app's icon goes to Shown, Hidden, or "ask me".
-- **Backups:** automatic before every change, plus export and import.
-- **Spacers:** blank gaps to group icons.
-- **System icons** (Wi-Fi, Battery, Bluetooth) move like any other icon.
-
-### 3. Notch and screens
-- **Perch Bar:** a strip that drops below the menu bar and holds hidden icons.
-- **Notch rescue:** icons that would land behind the notch go to the Perch Bar automatically.
-- **Spacing and padding:** sliders for the gap between icons and the padding around each one, with presets Default, Small (about 2 more icons fit) and Tiny (about 4 more). Uses the system's own `NSStatusItemSpacing` and `NSStatusItemSelectionPadding` settings. System icons update right away; other apps' icons update after they relaunch or you log out, and Perch says so.
-- **Per-display layouts** that switch when you plug a monitor in or out.
-
-### 4. Keyboard
-- **Quick Search:** a hotkey opens a search box; type "wifi" and its menu opens. The same box switches profiles and runs actions.
-- **Hotkeys** for showing hidden icons, the Perch Bar, search, clean mode, each profile, and any single icon.
-
-### 5. Spotlight and Shortcuts
-Built on App Intents, so it costs nothing until Spotlight calls it.
-- **Actions in Spotlight:** "Show Hidden Icons", "Hide Icons", "Show Archived Icons", "Clean Mode", "Switch Perch Profile", "Open Menu Bar Item".
-- **Menu bar icons searchable in Spotlight:** type "Wispr" in Spotlight, pick the Perch result, and Wispr's menu opens.
-- **Spotlight quick keys:** assign a short key such as `ph` to an action.
-- **Shortcuts app and `perch://` links**, so Raycast, Shortcuts or a script can drive Perch.
-
-### 6. Automations
-Show an icon when:
-
-| Trigger | Example |
+| Feature | How it works |
 |---|---|
-| Battery unplugged, charging, or below X% | Show Battery under 20% |
-| Wi-Fi on a named network, or disconnected | Show VPN away from home Wi-Fi |
-| An app is running or in front | Show Granola while Zoom is open |
-| Mic or camera in use | Show Wispr during a call |
-| Focus mode | Different icons for School and Client work |
-| Display connected | Desk layout at your desk |
-| Time schedule | Hide distractions 9 to 5 |
+| Show and hide | Click the bird. A divider stretched 10,000 pt pushes hidden icons off screen. |
+| Priorities | Each icon is Always show, Show when there's room, or Hidden. Perch ⌘-drags icons across the divider to match, on launch, priority change, display change, wake, unlock, and app launch or quit. |
+| Arrange | Three shelves; drag an icon to the one you want. Right-click for the same moves. |
+| Drawer (opt-in) | Hidden icons in a small bar under the menu bar. Needs Screen Recording; turned on in Settings → Features after an explanation. |
+| Search | ⌥⇧Space by default. Type, arrow keys, Return opens the icon's menu, even when hidden. |
+| Spotlight and Shortcuts | App Intents: Show Hidden Icons, Search Menu Bar Icons, Open Menu Bar Icon (any icon, by name). |
+| Spacing | Slider for `NSStatusItemSpacing` and `NSStatusItemSelectionPadding`. Apps pick it up when they reopen; Perch offers to reopen them. |
+| Auto-hide | After a delay or a click outside. Never while a menu is open or the pointer is in the bar. |
+| Settings | General, Features, Icons, About. Launch at login, icon style. |
 
-Each trigger listens to a system notification, so none of them poll.
+## Next
 
-### 7. Profiles
-- Whole layouts you can swap (School, Client work, Desk).
-- Switch by hotkey, automation, Focus mode or display setup.
-
-### 8. Groups and custom icons
-- **Groups:** several icons fold into one icon that opens a small dropdown, for example Drive, Dropbox and iCloud as one "Cloud" icon.
-- **Custom icons:** replace any long or ugly item with a compact one you pick: an SF Symbol, an emoji, a short label, or the app's own icon. The real item moves to Hidden, and clicking your version opens its real menu.
-- Custom icons are static, so they cost nothing. They suit icons whose look doesn't matter. Items that show live data (such as Stats) lose that data when swapped, so for those Perch points you to the app's own compact setting instead.
-- **Not doing:** live shrunken copies of other apps' icons. That would mean screenshotting the menu bar every second.
-
-### 9. Settings and polish
-- Settings tabs: General, Sections, Auto-Hide, Hotkeys, Automations, Profiles, Displays, Advanced, About.
-- **Health card:** permission status, last layout check, and Perch's own CPU and memory.
-- **Works without Screen Recording:** falls back to app icons. Screen Recording is optional and asked for once.
-- Launch at login, daily update check, light and dark mode.
+1. **Show icons while they're active.** For example a recording or timer icon comes out of hiding while it's doing something. Needs a cheap change signal; no polling.
+2. **Per-display layouts** that switch when you plug a monitor in or out.
+3. **Profiles** (School, Client work, Desk), switched by Focus mode or display.
+4. **Custom compact icons** for long items, static so they cost nothing.
+5. **Release:** notarized build, Homebrew tap.
 
 ## Not doing (and why)
 
@@ -88,17 +47,4 @@ Each trigger listens to a system notification, so none of them poll.
 | Menu bar tints and shapes | Extra windows on every screen and Space, all cosmetic |
 | Widgets (CPU, RAM) | Constant polling; Stats already does it |
 | Clipboard history, Dynamic Island, weather | Different apps; this is where Bartender got heavy |
-| Location trigger | Another permission and battery drain |
-| "Not clicked in 30 days" | Would mean watching every click |
-
-## Build order (one PR each)
-
-1. App shell: the Perch icon, sections with dividers, hide and show, auto-rehide, settings window, launch at login.
-2. Icon detection and the dropdown layout panel.
-3. Rearranging, layout guard, new icon rule, backups.
-4. Perch Bar, notch rescue, spacing and padding sliders.
-5. Quick Search, hotkeys, clean mode.
-6. Spotlight and Shortcuts (App Intents, `perch://` links).
-7. Automations, profiles, per-display layouts.
-8. Groups, custom icons and spacers.
-9. Release: GitHub release, Homebrew tap, README with screenshots.
+| Live shrunken copies of icons | Would mean screenshotting the menu bar constantly |

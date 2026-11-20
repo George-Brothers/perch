@@ -9,13 +9,15 @@ struct FeaturesPane: View {
     @State private var spacing = Double(MenuBarSpacing.current)
     @State private var appliedSpacing = MenuBarSpacing.current
     @State private var confirmingReopen = false
+    @State private var appsToReopen: [NSRunningApplication] = []
+    @State private var preparingReopen = false
 
     var body: some View {
         Form {
             Section {
                 Toggle(isOn: drawerBinding) {
                     Text("Hidden icons drawer")
-                    Text("Click the bird and hidden icons drop down in a small bar under the menu bar, so nothing in it has to move.")
+                    Text("Click Perch's menu bar icon and hidden icons drop down in a small bar under the menu bar. Needs Screen Recording; Perch asks only if you turn this on.")
                 }
                 if preferences.drawerEnabled && !permissions.hasScreenRecording {
                     LabeledContent {
@@ -28,9 +30,6 @@ struct FeaturesPane: View {
                         Text("Turn Perch on in Screen Recording, then restart Perch. Until then, hidden icons show in the menu bar.")
                     }
                 }
-            } footer: {
-                Text("The drawer needs Screen Recording permission to draw other apps' icons. Everything else in Perch works without it.")
-                    .foregroundStyle(.secondary)
             }
 
             Section {
@@ -39,8 +38,14 @@ struct FeaturesPane: View {
                     Text("Press it anywhere, type part of an icon's name, and press Return to open it.")
                 }
                 if preferences.searchEnabled {
-                    LabeledContent("Shortcut") {
-                        ShortcutRecorder(shortcut: $preferences.searchShortcut)
+                    LabeledContent {
+                        ShortcutRecorder(shortcut: $preferences.searchShortcut, recording: $preferences.isRecordingShortcut)
+                    } label: {
+                        Text("Shortcut")
+                        if preferences.searchShortcutTaken {
+                            Text("Another app already uses this shortcut. Pick a different one.")
+                                .foregroundStyle(.red)
+                        }
                     }
                 }
             }
@@ -49,19 +54,27 @@ struct FeaturesPane: View {
                 LabeledContent {
                     HStack(spacing: 8) {
                         Text("Tight").font(.caption).foregroundStyle(.secondary)
-                        Slider(value: $spacing, in: Double(MenuBarSpacing.range.lowerBound)...Double(MenuBarSpacing.range.upperBound))
+                        Slider(value: $spacing, in: Double(MenuBarSpacing.range.lowerBound)...Double(MenuBarSpacing.range.upperBound), step: 1)
                             .frame(minWidth: 160)
                         Text("Default").font(.caption).foregroundStyle(.secondary)
                     }
                 } label: {
                     Text("Icon spacing")
-                    Text("Less space between icons fits more of them in the menu bar.")
+                    Text("Fit more icons in the menu bar.")
                 }
                 SpacingPreview(spacing: CGFloat(spacing.rounded()))
-                if Int(spacing.rounded()) != appliedSpacing {
-                    LabeledContent("Apps pick this up when they reopen.") {
-                        Button("Apply…") { confirmingReopen = true }
+                LabeledContent("Reopens apps with menu bar icons") {
+                    Button("Apply…") {
+                        preparingReopen = true
+                        Task {
+                            defer { preparingReopen = false }
+                            // The list you confirm is exactly the list Perch reopens.
+                            appsToReopen = MenuBarSpacing.appsToReopen(await engine.rescan())
+                            confirmingReopen = true
+                        }
                     }
+                        .disabled(Int(spacing.rounded()) == appliedSpacing || MenuBarSpacing.isApplying
+                                  || preparingReopen || confirmingReopen)
                 }
             }
         }
@@ -72,7 +85,12 @@ struct FeaturesPane: View {
         } message: {
             Text("Perch will quit and reopen \(reopenList) so they use the new spacing. Save any work in them first.")
         }
-        .onAppear { permissions.refresh() }
+        .onAppear {
+            permissions.refresh()
+            // Settings stays alive between openings; drop an edit that was never applied.
+            appliedSpacing = MenuBarSpacing.current
+            spacing = Double(appliedSpacing)
+        }
         .sheet(isPresented: $explainingDrawer) {
             DrawerPermissionSheet(
                 onContinue: {
@@ -86,7 +104,7 @@ struct FeaturesPane: View {
     }
 
     private var reopenList: String {
-        let names = Set(engine.items.filter { $0.bundleID != "com.apple.controlcenter" }.map(\.displayName)).sorted()
+        let names = Set(appsToReopen.compactMap(\.localizedName)).sorted()
         return (names + ["Control Center", "Perch"]).joined(separator: ", ")
     }
 
@@ -94,7 +112,7 @@ struct FeaturesPane: View {
         let value = Int(spacing.rounded())
         MenuBarSpacing.set(value)
         appliedSpacing = value
-        MenuBarSpacing.reopenMenuBarApps(engine.items)
+        MenuBarSpacing.reopenMenuBarApps(appsToReopen)
     }
 
     /// Turning the drawer on explains the permission first, unless Perch already has it.
@@ -126,7 +144,7 @@ private struct DrawerPermissionSheet: View {
                 .font(.title3.weight(.semibold))
             VStack(alignment: .leading, spacing: 8) {
                 Text("To draw other apps' menu bar icons in the drawer, Perch needs Screen Recording permission.")
-                Text("Perch only looks at menu bar icons, only when you open the drawer. Nothing is saved or sent anywhere.")
+                Text("Perch takes pictures of menu bar icons while they're on screen, so the drawer can show them later. The pictures stay in memory and are never saved or sent.")
                 Text("Don't want that? Leave the drawer off. Perch works the same without it and shows hidden icons in the menu bar instead.")
                     .foregroundStyle(.secondary)
             }
@@ -166,8 +184,9 @@ private struct SpacingPreview: View {
 /// Click, then press the shortcut you want. Escape cancels.
 private struct ShortcutRecorder: View {
     @Binding var shortcut: Shortcut
-    @State private var recording = false
+    @Binding var recording: Bool
     @State private var monitor: Any?
+    @State private var resignObserver: NSObjectProtocol?
 
     var body: some View {
         Button {
@@ -184,6 +203,12 @@ private struct ShortcutRecorder: View {
 
     private func start() {
         recording = true
+        // Clicking away from Settings stops recording.
+        resignObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didResignKeyNotification, object: NSApp.keyWindow, queue: .main
+        ) { _ in
+            MainActor.assumeIsolated { stop() }
+        }
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             if event.keyCode == 53 { // Escape
                 stop()
@@ -202,8 +227,10 @@ private struct ShortcutRecorder: View {
     }
 
     private func stop() {
-        recording = false
+        if recording { recording = false }
         if let monitor { NSEvent.removeMonitor(monitor) }
         monitor = nil
+        if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) }
+        resignObserver = nil
     }
 }

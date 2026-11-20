@@ -41,7 +41,7 @@ struct ArrangeShelves: View {
     /// Icons in menu bar order, left to right, like the bar itself.
     private func items(for priority: IconPriority) -> [MenuBarItem] {
         engine.items
-            .filter { $0.section != .notShowing && preferences.priority(for: $0.key) == priority }
+            .filter { $0.section != .notShowing && $0.isMovable && preferences.priority(for: $0.key) == priority }
             .sorted { $0.frame.minX < $1.frame.minX }
     }
 
@@ -57,11 +57,22 @@ struct ArrangeShelves: View {
     }
 }
 
+extension IconPriority {
+    /// The same three names everywhere: shelves, right-click menus, the drawer.
+    var menuTitle: String {
+        switch self {
+        case .always: "Always Show"
+        case .auto: "Show When There's Room"
+        case .hide: "Hide"
+        }
+    }
+}
+
 private extension IconPriority {
     var shelfTitle: String {
         switch self {
-        case .always: "Always in the menu bar"
-        case .auto: "When there's room"
+        case .always: "Always show"
+        case .auto: "Show when there's room"
         case .hide: "Hidden"
         }
     }
@@ -91,7 +102,7 @@ private struct Shelf: View {
                 .foregroundStyle(.secondary)
                 .labelStyle(ShelfLabelStyle())
 
-            HStack(spacing: 2) {
+            FlowLayout(spacing: 2) {
                 ForEach(items) { item in
                     ShelfIcon(item: item, image: images.image(for: item), disabled: isArranging, onOpen: onOpen)
                         .draggable(item.key) {
@@ -101,7 +112,7 @@ private struct Shelf: View {
                             Text(item.displayName)
                             Divider()
                             ForEach(IconPriority.allCases.filter { $0 != priority }) { target in
-                                Button("Move to \(target.shelfTitle)") { onMove(item.key, target) }
+                                Button(target.menuTitle) { onMove(item.key, target) }
                             }
                         }
                 }
@@ -110,8 +121,8 @@ private struct Shelf: View {
                         .font(.system(size: 11))
                         .foregroundStyle(.tertiary)
                         .padding(.horizontal, 6)
+                        .frame(height: 26)
                 }
-                Spacer(minLength: 0)
             }
             .padding(4)
             .frame(maxWidth: .infinity, minHeight: 34, alignment: .leading)
@@ -119,12 +130,14 @@ private struct Shelf: View {
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
                     .fill(Color.primary.opacity(isTargeted ? 0.1 : 0.045))
             )
+            // Its own material, so pictures of light icons stay readable in a light window.
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
                     .strokeBorder(isTargeted ? Color.accentColor.opacity(0.7) : Color.primary.opacity(0.06),
                                   lineWidth: isTargeted ? 1.5 : 0.5)
             )
-            .environment(\.colorScheme, images.iconsAreLight ? .dark : .light)
+            .modifier(MatchIconColors(images: images, active: items.contains { images.image(for: $0) != nil }))
             .dropDestination(for: String.self) { keys, _ in
                 for key in keys { onMove(key, priority) }
                 return !keys.isEmpty
@@ -167,12 +180,56 @@ private struct ShelfIcon: View {
         }
         .background(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(Color.primary.opacity(hovering ? 0.12 : 0))
+                .fill(Color.primary.opacity(hovering && onOpen != nil ? 0.12 : 0))
         )
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .onTapGesture { if !disabled { onOpen?(item) } }
         .help(item.displayName)
+    }
+}
+
+/// Lays icons out left to right and wraps to a new row when a shelf is full.
+private struct FlowLayout: Layout {
+    var spacing: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let rows = arrange(width: proposal.width ?? .infinity, subviews: subviews)
+        let height = rows.last.map { $0.y + $0.height } ?? 0
+        let width = rows.map(\.width).max() ?? 0
+        return CGSize(width: proposal.width ?? width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        for row in arrange(width: bounds.width, subviews: subviews) {
+            var x = bounds.minX
+            for index in row.indices {
+                let size = subviews[index].sizeThatFits(.unspecified)
+                subviews[index].place(at: CGPoint(x: x, y: bounds.minY + row.y + (row.height - size.height) / 2),
+                                      proposal: ProposedViewSize(size))
+                x += size.width + spacing
+            }
+        }
+    }
+
+    private struct Row { var indices: [Int] = []; var y: CGFloat = 0; var width: CGFloat = 0; var height: CGFloat = 0 }
+
+    private func arrange(width: CGFloat, subviews: Subviews) -> [Row] {
+        var rows: [Row] = []
+        var row = Row()
+        for index in subviews.indices {
+            let size = subviews[index].sizeThatFits(.unspecified)
+            let needed = row.indices.isEmpty ? size.width : row.width + spacing + size.width
+            if needed > width, !row.indices.isEmpty {
+                rows.append(row)
+                row = Row(y: row.y + row.height + spacing)
+            }
+            row.width = row.indices.isEmpty ? size.width : row.width + spacing + size.width
+            row.height = max(row.height, size.height)
+            row.indices.append(index)
+        }
+        if !row.indices.isEmpty { rows.append(row) }
+        return rows
     }
 }
 

@@ -33,8 +33,6 @@ final class LayoutEngine: ObservableObject {
     /// The display layout at the last display-change trigger.
     private var lastScreenFrames: [CGRect] = NSScreen.screens.map(\.frame)
 
-    /// Apple's in-use indicator (the orange mic pill) can't be moved.
-    private static let unmovableIdentifiers: Set<String> = ["com.apple.menuextra.audiovideo"]
 
     init(preferences: Preferences, permissions: Permissions, menuBar: MenuBarController) {
         self.preferences = preferences
@@ -107,6 +105,17 @@ final class LayoutEngine: ObservableObject {
         let show: Bool
     }
 
+    /// Tries again in 2 s, up to five times; the next trigger starts over.
+    private func deferOrGiveUp() {
+        deferrals += 1
+        if deferrals <= 5 {
+            scheduleArrange(after: 2)
+        } else {
+            log.notice("a menu stayed open; skipping this pass")
+            deferrals = 0
+        }
+    }
+
     private func arrange() async {
         guard !isArranging else {
             arrangeAgain = true
@@ -117,16 +126,9 @@ final class LayoutEngine: ObservableObject {
         // Don't fight the user: wait while a menu is open or a mouse button is
         // down. Give up after a few tries; the next trigger tries again.
         if Self.userIsBusy() {
-            deferrals += 1
-            if deferrals <= 5 {
-                scheduleArrange(after: 2)
-            } else {
-                log.notice("a menu stayed open; skipping this pass")
-                deferrals = 0
-            }
+            deferOrGiveUp()
             return
         }
-        deferrals = 0
         isArranging = true
         defer {
             isArranging = false
@@ -140,10 +142,17 @@ final class LayoutEngine: ObservableObject {
         let current = await scan()
         let moves = plan(for: current)
         guard !moves.isEmpty else { return }
+        // Something opened during the scan (an icon from the drawer, say): try later.
+        if Self.userIsBusy() || menuBar.isTemporaryReveal {
+            deferOrGiveUp()
+            return
+        }
+        deferrals = 0
         log.notice("arranging: \(moves.count) move(s)")
 
         let generation = stuckGeneration
-        let wasRevealed = menuBar.visibility.isRevealed
+        // A bar that's out only for an opened icon goes back to hidden afterwards.
+        let wasRevealed = menuBar.visibility.isRevealed && !menuBar.isTemporaryReveal
         menuBar.reveal(armAutoHide: false)
         menuBar.isBusy = true
         try? await Task.sleep(for: .milliseconds(350))
@@ -161,7 +170,7 @@ final class LayoutEngine: ObservableObject {
             attempted.append(move)
             guard let divider = menuBar.dividerFrame(),
                   let from = AX.frame(of: move.item.element),
-                  from.minX >= 0
+                  MenuBarGeometry.isOnScreen(from, screen: menuBar.screen)
             else { continue }
             let target = CGPoint(x: move.show ? divider.maxX + 3 : divider.minX - 3, y: from.midY)
             let start = CGPoint(x: from.midX, y: from.midY)
@@ -210,7 +219,7 @@ final class LayoutEngine: ObservableObject {
         guard let perch = menuBar.perchFrame(), let screen = menuBar.screen else { return [] }
         let inBar = items.filter { $0.isInMenuBar }
         let movable = inBar.filter { item in
-            if Self.unmovableIdentifiers.contains(item.identifier ?? "") { return false }
+            if !item.isMovable { return false }
             if let x = stuck[item.key], abs(x - item.frame.minX) < 1 { return false }
             return true
         }

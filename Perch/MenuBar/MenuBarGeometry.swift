@@ -22,8 +22,16 @@ enum MenuBarGeometry {
     /// but are not menus.
     private static let ignoredOwners: Set<String> = ["Window Server", "Dock", "Notification Center"]
 
-    /// Perch's Arrange panel, which sits at menu level but isn't a menu.
-    @MainActor static var ignoredWindowNumber: Int?
+    /// Perch's own panels (drawer, Arrange, search) sit at menu level but aren't menus.
+    @MainActor static var ignoredWindowNumbers: Set<Int> = []
+
+    /// Whether an icon's frame starts on `screen` (any display when nil),
+    /// including displays left of the main one, whose x is negative.
+    /// Hidden icons are pushed off the left edge of their bar's display.
+    static func isOnScreen(_ frame: CGRect, screen: NSScreen? = nil) -> Bool {
+        let screens = screen.map { [$0] } ?? NSScreen.screens
+        return screens.contains { $0.frame.minX <= frame.minX && frame.minX < $0.frame.maxX }
+    }
 
     /// Whether any app has a menu or menu bar panel open right now.
     /// Reads window levels and sizes only, so it needs no Screen Recording permission.
@@ -41,10 +49,17 @@ enum MenuBarGeometry {
             return false
         }
         let menuLevel = Int(CGWindowLevelForKey(.popUpMenuWindow))
-        let barHeight = NSScreen.main.map(menuBarHeight(for:)) ?? 24
+        // Window bounds use a top-left origin on the primary display; find each
+        // display's top edge and bar height in those terms (displays can be stacked).
+        let primaryTop = NSScreen.screens.first?.frame.maxY ?? 0
+        let bars = NSScreen.screens.map { screen in
+            (frame: CGRect(x: screen.frame.minX, y: primaryTop - screen.frame.maxY,
+                           width: screen.frame.width, height: screen.frame.height),
+             height: menuBarHeight(for: screen))
+        }
         for window in windows {
-            // Perch's own Arrange panel sits at menu level but isn't a menu.
-            if let ignored = ignoredWindowNumber, window[kCGWindowNumber as String] as? Int == ignored { continue }
+            // Perch's own panels sit at menu level but aren't menus.
+            if let number = window[kCGWindowNumber as String] as? Int, ignoredWindowNumbers.contains(number) { continue }
             guard let layer = window[kCGWindowLayer as String] as? Int else { continue }
             if layer == menuLevel { return true }
             guard layer > 0, layer < 1000,
@@ -55,7 +70,9 @@ enum MenuBarGeometry {
             else { continue }
             // Menu bar icons themselves are exactly bar-height. Anything taller
             // that starts at or just under the menu bar is a panel hanging from it.
-            if bounds.minY <= barHeight + 4, bounds.height > barHeight + 4 {
+            let top = CGPoint(x: bounds.midX, y: bounds.minY)
+            guard let bar = bars.first(where: { $0.frame.contains(top) }) else { continue }
+            if bounds.minY <= bar.frame.minY + bar.height + 4, bounds.height > bar.height + 4 {
                 return true
             }
         }

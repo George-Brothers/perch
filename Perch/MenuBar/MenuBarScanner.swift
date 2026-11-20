@@ -52,6 +52,8 @@ enum MenuBarScanner {
 
         var result: [MenuBarItem] = []
         for (index, child) in children.enumerated() {
+            // Later presses and frame checks go to the item itself; keep them short too.
+            AXUIElementSetMessagingTimeout(child, 0.25)
             let identifier = AX.string(child, kAXIdentifierAttribute)
             if let identifier, skippedIdentifiers.contains(identifier) { continue }
 
