@@ -46,6 +46,9 @@ struct ArrangeBar: View {
     }
 
     @State private var drag: DragState?
+    /// True while the pointer is down. It also resets when a drag is cancelled,
+    /// which `onEnded` doesn't report, so a cancelled drag can't leave an icon stuck.
+    @GestureState private var dragging = false
     @State private var frames: [Slot: CGRect] = [:]
     @State private var rowFrames: [Row: CGRect] = [:]
     @State private var contentWidth: CGFloat = 0
@@ -71,6 +74,14 @@ struct ArrangeBar: View {
                     }
                 }
                 .coordinateSpace(name: "arrange")
+                // On the rows, not on each icon: an icon dragged into another
+                // row is a new view, and a gesture on the old one never ends.
+                .simultaneousGesture(dragGesture)
+                .onChange(of: dragging) { _, down in
+                    guard !down else { return }
+                    // After onEnded has had its chance to drop the icon.
+                    DispatchQueue.main.async { drag = nil }
+                }
                 .overlay(alignment: .topLeading) { floatingIcon }
                 .onPreferenceChange(SlotFrames.self) { if drag == nil { frames = $0 } }
                 .onPreferenceChange(RowFrames.self) { if drag == nil { rowFrames = $0 } }
@@ -175,7 +186,6 @@ struct ArrangeBar: View {
         case .perch:
             PerchMark(preferences: preferences, width: engine.perchWidth)
                 .opacity(drag?.slot == .perch ? 0 : 1)
-                .gesture(dragGesture(for: .perch, from: row))
         case .icon(let key):
             if let item = item(key) {
                 BarIcon(item: item, image: images.image(for: item),
@@ -186,7 +196,6 @@ struct ArrangeBar: View {
                     .onTapGesture {
                         if row == .off { explainOff(item) } else if !engine.isArranging { onOpenItem?(item) }
                     }
-                    .gesture(dragGesture(for: slot, from: row))
                     .contextMenu { contextMenu(for: item, in: row) }
             }
         }
@@ -225,11 +234,13 @@ struct ArrangeBar: View {
         }
     }
 
-    private func dragGesture(for slot: Slot, from row: Row) -> some Gesture {
+    private var dragGesture: some Gesture {
         DragGesture(minimumDistance: 3, coordinateSpace: .named("arrange"))
+            .updating($dragging) { _, down, _ in down = true }
             .onChanged { value in
                 guard !engine.isArranging else { return }
-                if drag == nil, let frame = frames[slot] {
+                if drag == nil, let (slot, frame) = frames.first(where: { $0.value.contains(value.startLocation) }),
+                   let row = rows.first(where: { $0.value.contains(slot) })?.key {
                     drag = DragState(
                         slot: slot, from: row, location: value.location,
                         grab: CGSize(width: value.startLocation.x - frame.minX, height: value.startLocation.y - frame.minY),
