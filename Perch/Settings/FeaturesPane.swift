@@ -8,9 +8,6 @@ struct FeaturesPane: View {
     @State private var explainingDrawer = false
     @State private var spacing = Double(MenuBarSpacing.current)
     @State private var appliedSpacing = MenuBarSpacing.current
-    @State private var confirmingReopen = false
-    @State private var appsToReopen: [NSRunningApplication] = []
-    @State private var preparingReopen = false
 
     var body: some View {
         Form {
@@ -45,28 +42,16 @@ struct FeaturesPane: View {
                     Text("Fit more icons in the menu bar.")
                 }
                 SpacingPreview(spacing: CGFloat(spacing.rounded()))
-                LabeledContent("Reopens apps with menu bar icons") {
-                    Button("Apply…") {
-                        preparingReopen = true
-                        Task {
-                            defer { preparingReopen = false }
-                            // The list you confirm is exactly the list Perch reopens.
-                            appsToReopen = MenuBarSpacing.appsToReopen(await engine.rescan())
-                            confirmingReopen = true
-                        }
-                    }
-                        .disabled(Int(spacing.rounded()) == appliedSpacing || MenuBarSpacing.isApplying
-                                  || preparingReopen || confirmingReopen)
+                LabeledContent {
+                    Button("Apply") { applySpacing() }
+                        .disabled(Int(spacing.rounded()) == appliedSpacing || MenuBarSpacing.isApplying)
+                } label: {
+                    Text("Apple's icons change right away")
+                    Text("Other apps' icons change the next time each app opens. Perch never restarts your apps.")
                 }
             }
         }
         .formStyle(.grouped)
-        .confirmationDialog("Reopen menu bar apps?", isPresented: $confirmingReopen) {
-            Button("Reopen Apps") { applySpacing() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Perch will quit and reopen \(reopenList) so they use the new spacing. Save any work in them first.")
-        }
         .onAppear {
             permissions.refresh()
             // Settings stays alive between openings; drop an edit that was never applied.
@@ -85,16 +70,11 @@ struct FeaturesPane: View {
         }
     }
 
-    private var reopenList: String {
-        let names = Set(appsToReopen.compactMap(\.localizedName)).sorted()
-        return (names + ["Control Center", "Perch"]).joined(separator: ", ")
-    }
-
     private func applySpacing() {
         let value = Int(spacing.rounded())
         MenuBarSpacing.set(value)
         appliedSpacing = value
-        MenuBarSpacing.reopenMenuBarApps(appsToReopen)
+        MenuBarSpacing.apply()
     }
 
     /// Turning the drawer on explains the permission first, unless Perch already has it.
