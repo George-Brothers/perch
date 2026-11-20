@@ -87,11 +87,13 @@ struct ArrangeBar: View {
                     }
                 }
 
-                Text(offHint ?? "Drag icons to reorder them or move them between rows. When the bar is full, icons on the left wait in Hidden.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(width: rowWidth + labelWidth, alignment: .leading)
+                if let offHint {
+                    Text(offHint)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(width: rowWidth + labelWidth, alignment: .leading)
+                }
             }
             .onChange(of: engine.isArranging) { _, arranging in if !arranging { pending = nil } }
             .onChange(of: barSignature) { _, _ in if !engine.isArranging { pending = nil } }
@@ -100,8 +102,11 @@ struct ArrangeBar: View {
 
     // MARK: - Rows
 
+    /// Every row is as wide as the room on this screen, so the bar row ends
+    /// where the screen does. Icons are drawn at their real size.
     private var rowWidth: CGFloat {
-        min(max(contentWidth + 12, 260), maxWidth - labelWidth)
+        let room = engine.room.map { $0 + 8 } ?? 0
+        return min(max(contentWidth + 12, room, 260), maxWidth - labelWidth)
     }
 
     private func rowView(_ row: Row) -> some View {
@@ -110,14 +115,8 @@ struct ArrangeBar: View {
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.secondary)
                 .frame(width: labelWidth, alignment: .leading)
-            HStack(spacing: 2) {
+            HStack(spacing: row == .off ? 6 : engine.iconGap) {
                 let slots = rows[row] ?? []
-                if slots.isEmpty {
-                    Text(row == .hidden ? "Drag icons here to hide them" : "Drag icons here")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
-                        .padding(.horizontal, 8)
-                }
                 ForEach(slots, id: \.self) { slot in
                     slotView(slot, in: row)
                         .background(GeometryReader { geometry in
@@ -132,10 +131,28 @@ struct ArrangeBar: View {
             .frame(width: rowWidth, height: 32, alignment: .trailing)
             .clipped()
             .background(rowBackground(row))
+            .overlay(alignment: .trailing) { if row == .bar { laptopEdge } }
             .background(GeometryReader { geometry in
                 Color.clear.preference(key: RowFrames.self, value: [row: geometry.frame(in: .named("arrange"))])
             })
             .modifier(MatchIconColors(images: images, active: row != .off && hasPictures))
+        }
+    }
+
+    /// On another display: where a MacBook's screen would cut the bar off.
+    @ViewBuilder
+    private var laptopEdge: some View {
+        if let laptop = engine.laptopRoom, laptop > 0, laptop + 8 < rowWidth {
+            Image(systemName: "laptopcomputer")
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+                .frame(width: 18, height: 30, alignment: .top)
+                .overlay(alignment: .bottom) {
+                    Capsule().fill(Color.secondary.opacity(0.6)).frame(width: 1.5, height: 16)
+                }
+                .padding(.trailing, laptop + 4 - 9)
+                .allowsHitTesting(false)
+                .help("A MacBook's screen ends here")
         }
     }
 
@@ -158,12 +175,13 @@ struct ArrangeBar: View {
     private func slotView(_ slot: Slot, in row: Row) -> some View {
         switch slot {
         case .perch:
-            PerchMark(preferences: preferences)
+            PerchMark(preferences: preferences, width: engine.perchWidth)
                 .opacity(drag?.slot == .perch ? 0 : 1)
                 .gesture(dragGesture(for: .perch, from: row))
         case .icon(let key):
             if let item = item(key) {
                 BarIcon(item: item, image: images.image(for: item),
+                        width: row == .off ? nil : item.frame.width,
                         waiting: row == .bar && item.section == .hidden && !engine.isArranging,
                         clickable: onOpenItem != nil && row != .off && !engine.isArranging)
                     .opacity(drag?.slot == slot ? 0 : (row == .off ? 0.5 : 1))
@@ -194,10 +212,10 @@ struct ArrangeBar: View {
             Group {
                 switch drag.slot {
                 case .perch:
-                    PerchMark(preferences: preferences)
+                    PerchMark(preferences: preferences, width: engine.perchWidth)
                 case .icon(let key):
                     if let item = item(key) {
-                        BarIcon(item: item, image: images.image(for: item), waiting: false, clickable: false)
+                        BarIcon(item: item, image: images.image(for: item), width: nil, waiting: false, clickable: false)
                     }
                 }
             }
@@ -345,6 +363,7 @@ private struct ContentWidth: PreferenceKey {
 /// Perch's own item, as it looks in the bar.
 private struct PerchMark: View {
     @ObservedObject var preferences: Preferences
+    var width: CGFloat?
 
     var body: some View {
         Group {
@@ -356,7 +375,7 @@ private struct PerchMark: View {
                     .foregroundStyle(.secondary)
             }
         }
-            .frame(width: 22, height: 26)
+            .frame(width: width ?? 22, height: 26)
             .contentShape(Rectangle())
             .help("Perch")
     }
@@ -366,6 +385,8 @@ private struct PerchMark: View {
 private struct BarIcon: View {
     let item: MenuBarItem
     let image: NSImage?
+    /// The icon's real width in the bar, so rows are drawn to scale.
+    let width: CGFloat?
     /// In the bar's order but waiting in Hidden because there's no room.
     let waiting: Bool
     let clickable: Bool
@@ -379,14 +400,15 @@ private struct BarIcon: View {
                     .interpolation(.high)
                     .aspectRatio(contentMode: .fit)
                     .frame(height: min(image.size.height, 24))
-                    .frame(minWidth: 22)
+                    .frame(minWidth: width == nil ? 22 : nil)
             } else {
                 ItemIcon(item: item)
                     .frame(width: 16, height: 16)
-                    .padding(.horizontal, 5)
+                    .padding(.horizontal, width == nil ? 5 : 0)
                     .frame(height: 26)
             }
         }
+        .frame(width: width.flatMap { $0 > 4 ? $0 : nil })
         .opacity(waiting ? 0.4 : 1)
         .background(
             RoundedRectangle(cornerRadius: 6, style: .continuous)

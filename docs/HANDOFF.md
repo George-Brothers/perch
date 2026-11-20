@@ -19,6 +19,7 @@
 13. `perch-bar-item`: Perch shows nothing, a line, or an icon (Settings → General). Clicking empty menu bar space shows or hides; right-click arranges.
 14. `perch-no-mouse`: moves by saved positions and app restarts, never the mouse.
 15. `perch-overflow-bar`: click opens Perch's bar (no Screen Recording needed); hidden icons open in place via copied menus (MenuMirror). Auto-hide removed.
+16. `perch-cutoff`: Arrange draws the bar to scale and ends where the screen does; on another display, a MacBook mark shows where its screen would cut off. No instruction text.
 
 ## macOS 26 facts
 - Every status item window is owned by Control Center (layer 25); AX per app gives identity (AXExtrasMenuBar).
