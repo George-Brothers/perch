@@ -198,7 +198,17 @@ final class LayoutEngine: ObservableObject {
 
     private func insertionIndex(for anchor: Anchor, in order: [Spot]) -> Int {
         switch anchor {
-        case .icon(let key): return order.firstIndex(of: .icon(key)) ?? order.count
+        case .icon(let key):
+            if let index = order.firstIndex(of: .icon(key)) { return index }
+            // An icon that isn't in the order (one that stays put): before the
+            // first one in the order right of it.
+            guard let x = items.first(where: { $0.key == key })?.frame.minX else { return order.count }
+            return order.firstIndex { spot in
+                switch spot {
+                case .icon(let other): return (items.first { $0.key == other }?.frame.minX ?? -.infinity) > x
+                case .perch: return (perchMinX ?? -.infinity) > x
+                }
+            } ?? order.count
         case .perch: return order.firstIndex(of: .perch) ?? order.count
         case .end: return order.count
         case .divider: return 0
@@ -321,7 +331,7 @@ final class LayoutEngine: ObservableObject {
     /// them later, on some unrelated trigger, would surprise you.
     private func deferOrGiveUp() {
         deferrals += 1
-        if deferrals <= 5 || queued != nil {
+        if deferrals <= 5 || (queued != nil && !respacing) {
             scheduleArrange(after: 2)
         } else {
             log.notice("a menu stayed open; skipping this pass")
@@ -342,7 +352,7 @@ final class LayoutEngine: ObservableObject {
         }
         // While the screen is locked the bar isn't drawn; try again later.
         if AppRestarter.screenIsLocked {
-            if queued != nil { scheduleArrange(after: 5) }
+            if queued != nil && !respacing { scheduleArrange(after: 5) }
             return false
         }
         // Recreating the divider would close an open menu; wait for it.
@@ -367,11 +377,14 @@ final class LayoutEngine: ObservableObject {
         // Without Accessibility the scan is empty, and the divider would hide
         // every icon. Moves wait until the permission is back.
         guard permissions.hasAccessibility else { return false }
-        if let order = queued {
+        if var order = queued {
             // A drop during this pass replaces the batch; keep the new one.
             let members = queuedFrom, revision = queuedRevision
             // Read now: a drop while this runs clears the flag, but this batch is still a respace.
             let isRespace = respacing, pair = respacePair
+            // A respace goes by the bar as it is now, which may have changed
+            // while it waited; if nothing's crowded anymore, the plan moves nothing.
+            if isRespace { order = respaceOrder(in: current) }
             // Icons that stay put and you didn't place keep their priority (judged
             // now, before a restart can move them).
             let leaving = Set(current.filter { staysPut($0) }.map(\.key)).subtracting(queuedPlaced)
@@ -562,6 +575,20 @@ final class LayoutEngine: ObservableObject {
         4 * Double(Float(abs(value)).ulp)
     }
 
+    /// Every icon Perch can place, left to right as they are now. Ones that
+    /// stay put are in it too, where they are: they hold their place.
+    private func respaceOrder(in items: [MenuBarItem]) -> [Spot] {
+        entries(for: items).compactMap { entry in
+            switch entry.kind {
+            case .perch: return .perch
+            case .fixed: return nil
+            case .icon(let key):
+                guard items.first(where: { $0.key == key })?.isMovable == true else { return nil }
+                return .icon(key)
+            }
+        }
+    }
+
     /// When each pair of icons was last spread out (when the batch ran), so
     /// one that spreading didn't help doesn't restart Control Center over and over.
     private var respaced: [String: Date] = [:]
@@ -581,17 +608,7 @@ final class LayoutEngine: ObservableObject {
             return false
         }
         let members = Set(items.filter { $0.isInMenuBar && $0.isMovable }.map(\.key))
-        // Every icon Perch can place, left to right as they are now.
-        let order: [Spot] = entries(for: items).compactMap { entry in
-            switch entry.kind {
-            case .perch: return .perch
-            case .fixed: return nil
-            case .icon(let key):
-                // Ones that stay put too, where they are: they hold their place.
-                guard items.first(where: { $0.key == key })?.isMovable == true else { return nil }
-                return .icon(key)
-            }
-        }
+        let order = respaceOrder(in: items)
         // Moving just Perch's item is fine too: that needs no restart.
         guard let plan = plan(order, in: items, members: members), !plan.writes.isEmpty || plan.perch != nil else {
             log.notice("saved spots are too close for the divider, and Perch can't spread them")
@@ -749,6 +766,14 @@ final class LayoutEngine: ObservableObject {
             }
             // No room between them (equal saved spots, say): nothing fits there.
             guard let u = upper, let l = lower, u > l else { return nil }
+            // As macOS keeps them (32-bit), the new spots must still be in order.
+            var previous = Float(u)
+            for n in movers.indices {
+                let next = Float(u - (u - l) * Double(n + 1) / (count + 1))
+                guard next < previous else { return nil }
+                previous = next
+            }
+            guard Float(l) < previous else { return nil }
             for (n, i) in movers.enumerated() {
                 let value = u - (u - l) * Double(n + 1) / (count + 1)
                 switch list[i].kind {
