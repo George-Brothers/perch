@@ -140,7 +140,7 @@ struct WelcomeView: View {
 
         case .settings:
             title("Settings")
-            para("To open Settings, right-click Arrange and choose Settings, or press ⌘, while Arrange is open. Opening Perch from the Applications folder also opens Settings.")
+            para("To open Settings, click the gear at the left end of Arrange. You can also press ⌘, while Arrange is open, or open Perch from the Applications folder.")
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 10) {
                 GridRow {
                     Text("Open at login").foregroundStyle(.secondary)
@@ -340,9 +340,15 @@ private struct MiniArrange: View {
     private let hidden = ["cloud", "camera.viewfinder"]
 
     var body: some View {
-        VStack(alignment: .trailing, spacing: 6) {
-            row(shown, fill: 0.10)
-            row(hidden, fill: 0.04, label: "Hidden")
+        HStack(spacing: 6) {
+            Image(systemName: "gearshape")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .frame(width: 20)
+            VStack(alignment: .trailing, spacing: 6) {
+                row(shown, fill: 0.10)
+                row(hidden, fill: 0.04, label: "Hidden")
+            }
         }
         .padding(8)
         .frame(width: 340)
@@ -360,7 +366,7 @@ private struct MiniArrange: View {
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Color.accentColor)
             }
-            .offset(x: 150, y: 22)
+            .offset(x: 170, y: 22)
         }
     }
 
@@ -418,19 +424,24 @@ private struct MiniSettings: View {
     var body: some View {
         HStack(spacing: 22) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Right-click Arrange")
+                Text("In Arrange")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .fixedSize()
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Settings…").font(.system(size: 12))
-                        .padding(.horizontal, 10).padding(.vertical, 4)
-                        .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 5))
+                // The left end of Arrange, with its gear.
+                HStack(spacing: 6) {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 12))
                         .foregroundStyle(.white)
-                    Text("Quit Perch").font(.system(size: 12)).padding(.horizontal, 10)
+                        .frame(width: 24, height: 24)
+                        .background(Color.accentColor, in: Circle())
+                    VStack(spacing: 5) {
+                        RoundedRectangle(cornerRadius: 5).fill(Color.white.opacity(0.10)).frame(width: 70, height: 20)
+                        RoundedRectangle(cornerRadius: 5).fill(Color.white.opacity(0.04)).frame(width: 70, height: 20)
+                    }
                 }
-                .padding(6)
-                .perchSurface(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .padding(7)
+                .perchSurface(RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .shadow(color: .black.opacity(0.2), radius: 4, y: 2)
             }
 
