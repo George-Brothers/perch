@@ -382,12 +382,16 @@ final class LayoutEngine: ObservableObject {
         guard permissions.hasAccessibility else { return false }
         if var order = queued {
             // A drop during this pass replaces the batch; keep the new one.
-            let members = queuedFrom, revision = queuedRevision
+            var members = queuedFrom
+            let revision = queuedRevision
             // Read now: a drop while this runs clears the flag, but this batch is still a respace.
             let isRespace = respacing, pair = respacePair
             // A respace goes by the bar as it is now, which may have changed
             // while it waited; if nothing's crowded anymore, the plan moves nothing.
-            if isRespace { order = respaceOrder(in: current) }
+            if isRespace {
+                order = respaceOrder(in: current)
+                members = Set(current.filter { $0.isInMenuBar && $0.isMovable }.map(\.key))
+            }
             // Icons that stay put and you didn't place keep their priority (judged
             // now, before a restart can move them).
             let leaving = Set(current.filter { staysPut($0) }.map(\.key)).subtracting(queuedPlaced)
@@ -850,7 +854,8 @@ final class LayoutEngine: ObservableObject {
         setPriorities(order, in: after, members: members, keepsPriorities: keepsPriorities, leaving: leaving)
         // One that never came back can't be checked: treat it as out of place.
         let missing = saved.map(\.key).filter { key in !after.contains { $0.key == key && $0.isInMenuBar } }
-        let wrong = missing + misplaced(order, in: after, moved: movedKeys, members: members)
+        // Icons left out without you asking aren't judged: they may land either side.
+        let wrong = missing + misplaced(order, in: after, moved: movedKeys, members: members.subtracting(leaving))
         var stuck: [String] = []
         for key in wrong {
             // Undo its saved spot, so a later restart doesn't move it by surprise.
@@ -858,7 +863,9 @@ final class LayoutEngine: ObservableObject {
                 log.error("couldn't put back the spot for \(write.name, privacy: .public)")
                 stuck.append(write.name)
             }
-            if !order.contains(.icon(key)) {
+            if keepsPriorities {
+                // A respace didn't change any priority, so there's none to put back.
+            } else if !order.contains(.icon(key)) {
                 // An icon marked hidden among the shown ones would take its neighbors along.
                 preferences.setPriority(.shown, for: key)
             } else if let was = previous[key], preferences.priority(for: key) != was {
