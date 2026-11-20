@@ -4,7 +4,11 @@ import SwiftUI
 struct FeaturesPane: View {
     @ObservedObject var preferences: Preferences
     @ObservedObject var permissions: Permissions
+    let engine: LayoutEngine
     @State private var explainingDrawer = false
+    @State private var spacing = Double(MenuBarSpacing.current)
+    @State private var appliedSpacing = MenuBarSpacing.current
+    @State private var confirmingReopen = false
 
     var body: some View {
         Form {
@@ -28,8 +32,34 @@ struct FeaturesPane: View {
                 Text("The drawer needs Screen Recording permission to draw other apps' icons. Everything else in Perch works without it.")
                     .foregroundStyle(.secondary)
             }
+
+            Section {
+                LabeledContent {
+                    HStack(spacing: 8) {
+                        Text("Tight").font(.caption).foregroundStyle(.secondary)
+                        Slider(value: $spacing, in: Double(MenuBarSpacing.range.lowerBound)...Double(MenuBarSpacing.range.upperBound))
+                            .frame(minWidth: 160)
+                        Text("Default").font(.caption).foregroundStyle(.secondary)
+                    }
+                } label: {
+                    Text("Icon spacing")
+                    Text("Less space between icons fits more of them in the menu bar.")
+                }
+                SpacingPreview(spacing: CGFloat(spacing.rounded()))
+                if Int(spacing.rounded()) != appliedSpacing {
+                    LabeledContent("Apps pick this up when they reopen.") {
+                        Button("Apply…") { confirmingReopen = true }
+                    }
+                }
+            }
         }
         .formStyle(.grouped)
+        .confirmationDialog("Reopen menu bar apps?", isPresented: $confirmingReopen) {
+            Button("Reopen Apps") { applySpacing() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Perch will quit and reopen \(reopenList) so they use the new spacing. Save any work in them first.")
+        }
         .onAppear { permissions.refresh() }
         .sheet(isPresented: $explainingDrawer) {
             DrawerPermissionSheet(
@@ -41,6 +71,18 @@ struct FeaturesPane: View {
                 onCancel: { explainingDrawer = false }
             )
         }
+    }
+
+    private var reopenList: String {
+        let names = Set(engine.items.filter { $0.bundleID != "com.apple.controlcenter" }.map(\.displayName)).sorted()
+        return (names + ["Control Center", "Perch"]).joined(separator: ", ")
+    }
+
+    private func applySpacing() {
+        let value = Int(spacing.rounded())
+        MenuBarSpacing.set(value)
+        appliedSpacing = value
+        MenuBarSpacing.reopenMenuBarApps(engine.items)
     }
 
     /// Turning the drawer on explains the permission first, unless Perch already has it.
@@ -88,5 +130,23 @@ private struct DrawerPermissionSheet: View {
         }
         .padding(22)
         .frame(width: 400)
+    }
+}
+
+/// A few menu bar style icons drawn with the chosen spacing.
+private struct SpacingPreview: View {
+    let spacing: CGFloat
+    private let symbols = ["wifi", "battery.75percent", "speaker.wave.2.fill", "moon.fill", "magnifyingglass"]
+
+    var body: some View {
+        HStack(spacing: spacing) {
+            ForEach(symbols, id: \.self) { Image(systemName: $0) }
+        }
+        .font(.system(size: 13, weight: .medium))
+        .frame(height: 24)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 4)
+        .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.primary.opacity(0.05)))
+        .animation(.snappy(duration: 0.15), value: spacing)
     }
 }
