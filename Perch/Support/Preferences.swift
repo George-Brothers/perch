@@ -57,6 +57,7 @@ final class Preferences: ObservableObject {
         static let autoRehideEnabled = "autoRehideEnabled"
         static let rehideDelay = "rehideDelay"
         static let rehideOnClickOutside = "rehideOnClickOutside"
+        static let drawerEnabled = "drawerEnabled"
     }
 
     private let defaults: UserDefaults
@@ -78,6 +79,11 @@ final class Preferences: ObservableObject {
     @Published var rehideOnClickOutside: Bool {
         didSet { defaults.set(rehideOnClickOutside, forKey: Key.rehideOnClickOutside) }
     }
+    /// Show hidden icons in a drawer under the menu bar. Off by default
+    /// because it needs Screen Recording permission.
+    @Published var drawerEnabled: Bool {
+        didSet { defaults.set(drawerEnabled, forKey: Key.drawerEnabled) }
+    }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -86,6 +92,7 @@ final class Preferences: ObservableObject {
             Key.autoRehideEnabled: true,
             Key.rehideDelay: 15.0,
             Key.rehideOnClickOutside: true,
+            Key.drawerEnabled: false,
         ])
         iconStyle = PerchIconStyle(rawValue: defaults.string(forKey: Key.iconStyle) ?? "") ?? .bird
         let stored = defaults.dictionary(forKey: Key.priorities) as? [String: String] ?? [:]
@@ -93,6 +100,7 @@ final class Preferences: ObservableObject {
         autoRehideEnabled = defaults.bool(forKey: Key.autoRehideEnabled)
         rehideDelay = defaults.double(forKey: Key.rehideDelay)
         rehideOnClickOutside = defaults.bool(forKey: Key.rehideOnClickOutside)
+        drawerEnabled = defaults.bool(forKey: Key.drawerEnabled)
     }
 
     func priority(for key: String) -> IconPriority {

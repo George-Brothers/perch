@@ -56,6 +56,14 @@ final class LayoutEngine: ObservableObject {
         Task { await scan() }
     }
 
+    /// Runs while a pass has every icon on screen, so the drawer can picture them.
+    var whileRevealed: (() async -> Void)?
+
+    /// Rescans and returns the icons, for callers that need them right away.
+    func rescan() async -> [MenuBarItem] {
+        await scan()
+    }
+
     /// Asks for an arrange pass after `delay`. Repeated requests collapse into one.
     func scheduleArrange(after delay: TimeInterval = 0.4) {
         pendingArrange?.cancel()
@@ -163,6 +171,7 @@ final class LayoutEngine: ObservableObject {
             try? await Task.sleep(for: .milliseconds(150))
         }
 
+        await whileRevealed?()
         menuBar.isBusy = false
         if wasRevealed {
             menuBar.reveal()

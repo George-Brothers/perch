@@ -47,6 +47,11 @@ final class MenuBarController: NSObject, ObservableObject {
     var openArrange: ((NSStatusBarButton?) -> Void)?
     /// Called once Perch's items are placed, and again after a reset.
     var onReady: (() -> Void)?
+    /// Handles a click on the bird instead of revealing, when the drawer is on.
+    /// Returns false to fall back to revealing in the menu bar.
+    var toggleDrawer: (() -> Bool)?
+    /// Runs once at launch while everything is still showing, before the first hide.
+    var beforeFirstHide: (() async -> Void)?
 
     var perchButton: NSStatusBarButton? { perchItem.button }
 
@@ -115,6 +120,49 @@ final class MenuBarController: NSObject, ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + (needsReveal ? 0.3 : 0.05)) {
             ItemOpener.open(item)
         }
+    }
+
+    /// Opens a hidden icon picked from the drawer: shows the hidden icons just
+    /// long enough for its menu, then hides them again when the menu closes.
+    func openFromDrawer(_ item: MenuBarItem) {
+        guard !isBusy else { return }
+        let wasRevealed = visibility.isRevealed
+        if !wasRevealed {
+            visibility = .revealed
+            apply()
+            rehider.disarm()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            guard let self else { return }
+            // Re-read the icon now that it's on screen.
+            ItemOpener.open(item)
+            if !wasRevealed { self.collapseWhenMenuCloses() }
+        }
+    }
+
+    private var menuWatch: Timer?
+
+    /// Checks twice a second while the opened menu is up, and only then.
+    private func collapseWhenMenuCloses() {
+        menuWatch?.invalidate()
+        var checks = 0
+        var sawMenu = false
+        let timer = Timer(timeInterval: 0.4, repeats: true) { [weak self] timer in
+            MainActor.assumeIsolated {
+                guard let self else { timer.invalidate(); return }
+                checks += 1
+                let open = MenuBarGeometry.isMenuOpen()
+                sawMenu = sawMenu || open
+                // Done when the menu closed, or if none ever opened, or after 2 minutes.
+                if (!open && (sawMenu || checks >= 5)) || checks > 300 {
+                    timer.invalidate()
+                    self.menuWatch = nil
+                    if self.visibility.isRevealed, !self.isBusy { self.collapse() }
+                }
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        menuWatch = timer
     }
 
     // MARK: - Geometry for the layout engine
@@ -243,8 +291,14 @@ final class MenuBarController: NSObject, ObservableObject {
 
     private func waitForPlacement() {
         if screenFrame(of: perchItem) != nil || placementAttempts >= 12 {
-            collapse()
-            onReady?()
+            Task {
+                if let beforeFirstHide {
+                    await beforeFirstHide()
+                    self.beforeFirstHide = nil
+                }
+                collapse()
+                onReady?()
+            }
             return
         }
         placementAttempts += 1
@@ -272,7 +326,7 @@ final class MenuBarController: NSObject, ObservableObject {
             showMenu()
         } else if event?.modifierFlags.contains(.option) == true {
             openArrange?(perchItem.button)
-        } else {
+        } else if toggleDrawer?() != true {
             toggle()
         }
     }
@@ -297,7 +351,9 @@ final class MenuBarController: NSObject, ObservableObject {
         perchItem.menu = nil
     }
 
-    @objc private func menuToggle() { toggle() }
+    @objc private func menuToggle() {
+        if toggleDrawer?() != true { toggle() }
+    }
     @objc private func menuArrange() { openArrange?(perchItem.button) }
     @objc private func menuSettings() { openSettings?(nil) }
     @objc private func menuQuit() { NSApp.terminate(nil) }
