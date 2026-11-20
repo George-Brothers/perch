@@ -51,9 +51,14 @@ final class PanelController {
         installMonitors()
     }
 
+    /// Runs when the panel closes, however it was closed.
+    var onClose: (() -> Void)?
+
     func close() {
+        let wasOpen = isOpen
         panel?.orderOut(nil)
         removeMonitors()
+        if wasOpen { onClose?() }
     }
 
     private func makePanel() -> PerchPanel {

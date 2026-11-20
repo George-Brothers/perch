@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settings: SettingsWindowController!
     private var arrangePanel: PanelController!
     private var drawer: DrawerController!
+    private var welcomePanel: PanelController!
     private let images = IconImages()
     private var spotlight: SpotlightIndex!
     private var cancellables = Set<AnyCancellable>()
@@ -150,21 +151,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.arrangePanel.toggle(anchor: menuBar.anchor)
         }
 
-        // First launch: Perch needs Accessibility to arrange anything, so show
-        // the Arrange list (which asks for it) instead of a tutorial.
-        if !permissions.hasAccessibility {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                self?.arrangePanel.open(anchor: menuBar.anchor)
-            }
+        // First launch: a short welcome, which also asks for Accessibility.
+        // It counts as seen once it closes with Accessibility allowed, so
+        // someone who goes off to allow it sees it again when they come back.
+        welcomePanel = PanelController(model: engine) { [weak self] in
+            AnyView(WelcomeView(permissions: permissions) { self?.welcomePanel.close() })
         }
+        welcomePanel.onOpen = {}
+        welcomePanel.onClose = {
+            if permissions.hasAccessibility { UserDefaults.standard.set(true, forKey: WelcomeView.shownKey) }
+        }
+        if !UserDefaults.standard.bool(forKey: WelcomeView.shownKey) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.showWelcome() }
+        }
+        permissions.$hasAccessibility
+            .removeDuplicates()
+            .dropFirst()
+            .filter { $0 }
+            .sink { [weak self] _ in
+                guard !UserDefaults.standard.bool(forKey: WelcomeView.shownKey) else { return }
+                self?.showWelcome()
+            }
+            .store(in: &cancellables)
     }
 
-    private enum Panel { case drawer, arrange }
+    private enum Panel { case drawer, arrange, welcome }
 
     /// Only one of Perch's panels is open at a time.
     private func closePanels(except kept: Panel?) {
         if kept != .drawer { drawer.close() }
         if kept != .arrange { arrangePanel.close() }
+        if kept != .welcome { welcomePanel?.close() }
+    }
+
+    private func showWelcome() {
+        closePanels(except: .welcome)
+        welcomePanel.open(anchor: menuBar.anchor)
     }
 
     // MARK: - Actions for Spotlight and Shortcuts
