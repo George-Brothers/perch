@@ -24,7 +24,7 @@ Perch uses about 15 MB of memory and no CPU while idle. It reacts to events and 
 ## Using it
 
 - **Click** empty menu bar space (or Perch's line or icon): Perch's bar.
-- **Right-click** empty menu bar space: Arrange. Drag icons to reorder them. Settings and Quit are in its ⋯ menu.
+- **Right-click** empty menu bar space: Arrange. Drag icons to reorder them. Right-click it (or press ⌘,) for Settings and Quit.
 - **Spotlight**: "Arrange Menu Bar" opens Arrange too.
 - **⌘Space**, then an icon's name: open that icon's menu.
 

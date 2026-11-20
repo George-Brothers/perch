@@ -61,8 +61,6 @@ struct ArrangeBar: View {
     /// This press started on nothing; logged once.
     @State private var ignoredDrag = false
 
-    private let labelWidth: CGFloat = 70
-
     var body: some View {
         if !permissions.hasAccessibility {
             PermissionCard(permissions: permissions)
@@ -101,7 +99,7 @@ struct ArrangeBar: View {
                     Text("The menu bar updates when you close this.")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
-                        .frame(width: rowWidth + labelWidth, alignment: .leading)
+                        .frame(width: rowWidth, alignment: .leading)
                 }
 
                 if let notice = engine.notice {
@@ -109,7 +107,7 @@ struct ArrangeBar: View {
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                        .frame(width: rowWidth + labelWidth, alignment: .leading)
+                        .frame(width: rowWidth, alignment: .leading)
                 }
 
                 if let offHint {
@@ -117,7 +115,7 @@ struct ArrangeBar: View {
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                        .frame(width: rowWidth + labelWidth, alignment: .leading)
+                        .frame(width: rowWidth, alignment: .leading)
                 }
             }
             // Keep showing your drop until every move is done and the bar has settled.
@@ -134,15 +132,11 @@ struct ArrangeBar: View {
     /// where the screen does. Icons are drawn at their real size.
     private var rowWidth: CGFloat {
         let room = engine.room.map { $0 + 8 } ?? 0
-        return min(max(contentWidth + 12, room, 260), maxWidth - labelWidth)
+        return min(max(contentWidth + 12, room, 260), maxWidth)
     }
 
     private func rowView(_ row: Row) -> some View {
         HStack(spacing: 0) {
-            Text(row.title)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
-                .frame(width: labelWidth, alignment: .leading)
             HStack(spacing: row == .off ? 6 : engine.iconGap) {
                 let slots = rows[row] ?? []
                 ForEach(slots, id: \.self) { slot in
@@ -159,11 +153,35 @@ struct ArrangeBar: View {
             .frame(width: rowWidth, height: 32, alignment: .trailing)
             .clipped()
             .background(rowBackground(row))
+            .overlay(alignment: .leading) { rowLabel(row) }
             .overlay(alignment: .trailing) { if row == .bar { laptopEdge } }
+            .help(row.title)
             .background(GeometryReader { geometry in
                 Color.clear.preference(key: RowFrames.self, value: [row: geometry.frame(in: .named("arrange"))])
             })
-            .modifier(MatchIconColors(images: images, active: row != .off && hasPictures))
+        }
+    }
+
+    /// A faint name inside the row, left of its icons, if they leave room.
+    /// The bar row shows a spinner there while Perch moves icons instead.
+    @ViewBuilder
+    private func rowLabel(_ row: Row) -> some View {
+        if row == .bar {
+            if engine.isArranging {
+                ProgressView().controlSize(.mini).padding(.leading, 10)
+            }
+        } else if drag == nil {
+            let used = (rows[row] ?? []).reduce(CGFloat(0)) { total, slot in
+                guard case .icon(let key) = slot, let item = item(key) else { return total + 22 }
+                return total + (row == .off ? 28 : item.frame.width + engine.iconGap)
+            }
+            if used + 90 < rowWidth {
+                Text(row.title)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                    .padding(.leading, 10)
+                    .allowsHitTesting(false)
+            }
         }
     }
 
@@ -189,13 +207,8 @@ struct ArrangeBar: View {
         let targeted = drag != nil && targetRow == row && row != .off
         let shape = RoundedRectangle(cornerRadius: 8, style: .continuous)
         ZStack {
-            if row == .bar {
-                shape.fill(.regularMaterial)
-            } else {
-                shape.fill(Color.primary.opacity(0.05))
-            }
-            shape.strokeBorder(targeted ? Color.accentColor.opacity(0.7) : Color.primary.opacity(0.08),
-                               lineWidth: targeted ? 1.5 : 0.5)
+            shape.fill(Color.primary.opacity(row == .bar ? 0.08 : 0.035))
+            if targeted { shape.strokeBorder(Color.accentColor.opacity(0.7), lineWidth: 1.5) }
         }
     }
 
@@ -397,10 +410,6 @@ struct ArrangeBar: View {
         return row == .bar && item.section == .hidden ? "no room right now" : nil
     }
 
-    private var hasPictures: Bool {
-        icons.contains { images.image(for: $0) != nil }
-    }
-
     private func item(_ key: String) -> MenuBarItem? {
         engine.items.first { $0.key == key }
     }
@@ -536,40 +545,50 @@ struct ArrangePanelView: View {
     let onOpenItem: (MenuBarItem) -> Void
     let onOpenSettings: () -> Void
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Text("Arrange")
-                    .font(.system(size: 13, weight: .semibold))
-                if engine.isArranging {
-                    ProgressView().controlSize(.mini)
-                }
-                Spacer()
-                Menu {
-                    Button("Settings…", action: onOpenSettings)
-                    Divider()
-                    Button("Quit Perch") { NSApp.terminate(nil) }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                        .font(.system(size: 13))
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .help("Settings and Quit")
-            }
+    /// Pictures of icons look as they do in the menu bar, so the panel takes
+    /// the menu bar's look (light or dark), like Perch's bar.
+    @ObservedObject private var pictures: IconImages
 
-            ArrangeBar(engine: engine, preferences: preferences, permissions: permissions,
-                       images: images, onOpenItem: onOpenItem, maxWidth: maxWidth)
-        }
-        .padding(14)
-        .frame(minWidth: 320, alignment: .leading)
-        .fixedSize()
-        .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5)
-        )
+    init(engine: LayoutEngine, preferences: Preferences, permissions: Permissions, images: IconImages,
+         maxWidth: CGFloat, onOpenItem: @escaping (MenuBarItem) -> Void, onOpenSettings: @escaping () -> Void) {
+        self.engine = engine
+        self.preferences = preferences
+        self.permissions = permissions
+        self.images = images
+        self.maxWidth = maxWidth
+        self.onOpenItem = onOpenItem
+        self.onOpenSettings = onOpenSettings
+        self.pictures = images
+    }
+
+    private var hasPictures: Bool {
+        engine.items.contains { $0.isInMenuBar && pictures.image(for: $0) != nil }
+    }
+
+    var body: some View {
+        // Just the rows. Settings and Quit are a right-click (or ⌘,) away.
+        ArrangeBar(engine: engine, preferences: preferences, permissions: permissions,
+                   images: images, onOpenItem: onOpenItem, maxWidth: maxWidth)
+            .padding(8)
+            .frame(minWidth: 280, alignment: .leading)
+            .fixedSize()
+            .background(.regularMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5)
+            )
+            .modifier(MatchIconColors(images: pictures, active: hasPictures))
+            .contextMenu {
+                Button("Settings…", action: onOpenSettings)
+                Divider()
+                Button("Quit Perch") { NSApp.terminate(nil) }
+            }
+            .background {
+                Button("Settings…", action: onOpenSettings)
+                    .keyboardShortcut(",", modifiers: .command)
+                    .opacity(0)
+                    .allowsHitTesting(false)
+            }
     }
 }
