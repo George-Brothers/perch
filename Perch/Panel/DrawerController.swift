@@ -196,7 +196,7 @@ struct DrawerView: View {
                     .padding(.horizontal, 10)
             } else {
                 ForEach(hidden) { item in
-                    DrawerIcon(item: item, image: images.image(for: item),
+                    DrawerIcon(item: item, image: images.image(for: item), invert: !images.iconsAreLight,
                                isActive: state.activeKey == item.key, onOpen: onOpen)
                         .contextMenu { priorityMenu(for: item) }
                 }
@@ -205,9 +205,7 @@ struct DrawerView: View {
         .frame(minHeight: 24)
         .padding(.horizontal, 4)
         .padding(.vertical, 2)
-        .background(.regularMaterial, in: Capsule(style: .continuous))
-        .overlay(Capsule(style: .continuous).strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5))
-        .modifier(MatchIconColors(images: images, active: hidden.contains { images.image(for: $0) != nil }))
+        .perchSurface(Capsule(style: .continuous))
         .fixedSize()
         .padding(1)
     }
@@ -225,21 +223,6 @@ struct DrawerView: View {
     }
 }
 
-/// Pictures of icons are drawn for the menu bar behind them, so give the drawer
-/// the same light or dark look. With no pictures yet, follow the system.
-struct MatchIconColors: ViewModifier {
-    @ObservedObject var images: IconImages
-    let active: Bool
-
-    func body(content: Content) -> some View {
-        if active {
-            content.environment(\.colorScheme, images.iconsAreLight ? .dark : .light)
-        } else {
-            content
-        }
-    }
-}
-
 /// What Perch's bar is showing right now.
 @MainActor
 final class DrawerState: ObservableObject {
@@ -249,6 +232,8 @@ final class DrawerState: ObservableObject {
 private struct DrawerIcon: View {
     let item: MenuBarItem
     let image: NSImage?
+    /// The picture was taken on a light menu bar, so it's dark; Perch's bar is dark.
+    let invert: Bool
     let isActive: Bool
     let onOpen: (MenuBarItem, CGFloat) -> Void
     @State private var hovering = false
@@ -263,6 +248,7 @@ private struct DrawerIcon: View {
                         .resizable()
                         .interpolation(.high)
                         .aspectRatio(contentMode: .fit)
+                        .modifier(LightOnDark(active: invert))
                         .frame(height: min(image.size.height, 24))
                         .frame(minWidth: 26)
                 } else {
@@ -287,5 +273,31 @@ private struct DrawerIcon: View {
         })
         .help(item.displayName)
         .accessibilityLabel(item.displayName)
+    }
+}
+
+
+/// Perch's bar and Arrange are always dark, so they stand out over any window.
+extension View {
+    func perchSurface(_ shape: some InsettableShape) -> some View {
+        background {
+            shape.fill(Color.black.opacity(0.82))
+                .background(.ultraThinMaterial, in: shape)
+                .overlay(shape.strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5))
+        }
+        .environment(\.colorScheme, .dark)
+    }
+}
+
+/// Icon pictures taken on a light menu bar are dark; on Perch's dark surfaces
+/// they're turned light, keeping each color's hue (invert, then rotate the hue back).
+struct LightOnDark: ViewModifier {
+    let active: Bool
+    func body(content: Content) -> some View {
+        if active {
+            content.colorInvert().hueRotation(.degrees(180))
+        } else {
+            content
+        }
     }
 }

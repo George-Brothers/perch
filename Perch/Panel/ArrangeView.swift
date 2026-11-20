@@ -207,7 +207,7 @@ struct ArrangeBar: View {
         let targeted = drag != nil && targetRow == row && row != .off
         let shape = RoundedRectangle(cornerRadius: 8, style: .continuous)
         ZStack {
-            shape.fill(Color.primary.opacity(row == .bar ? 0.08 : 0.035))
+            shape.fill(Color.white.opacity(row == .bar ? 0.08 : 0.04))
             if targeted { shape.strokeBorder(Color.accentColor.opacity(0.7), lineWidth: 1.5) }
         }
     }
@@ -220,7 +220,7 @@ struct ArrangeBar: View {
                 .opacity(drag?.slot == .perch ? 0 : 1)
         case .icon(let key):
             if let item = item(key) {
-                BarIcon(item: item, image: images.image(for: item),
+                BarIcon(item: item, image: images.image(for: item), invert: !images.iconsAreLight,
                         width: row == .off ? nil : item.frame.width,
                         waiting: engine.isArranging ? nil : waitingNote(for: item, in: row),
                         clickable: onOpenItem != nil && row != .off && !engine.isArranging)
@@ -254,13 +254,14 @@ struct ArrangeBar: View {
                     PerchMark(preferences: preferences, width: engine.perchWidth)
                 case .icon(let key):
                     if let item = item(key) {
-                        BarIcon(item: item, image: images.image(for: item), width: nil, waiting: nil, clickable: false)
+                        BarIcon(item: item, image: images.image(for: item), invert: !images.iconsAreLight,
+                                width: nil, waiting: nil, clickable: false)
                     }
                 }
             }
             .frame(width: frame.width, height: frame.height)
-            .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(.regularMaterial))
-            .shadow(color: .black.opacity(0.2), radius: 4, y: 1)
+            .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color(white: 0.24)))
+            .shadow(color: .black.opacity(0.35), radius: 5, y: 2)
             .offset(x: drag.location.x - drag.grab.width, y: drag.location.y - drag.grab.height)
             .allowsHitTesting(false)
         }
@@ -464,6 +465,8 @@ private struct PerchMark: View {
 private struct BarIcon: View {
     let item: MenuBarItem
     let image: NSImage?
+    /// The picture was taken on a light menu bar; Arrange is dark.
+    let invert: Bool
     /// The icon's real width in the bar, so rows are drawn to scale.
     let width: CGFloat?
     /// Why it's drawn faded: it isn't in its row's spot yet (no room, or its
@@ -479,6 +482,7 @@ private struct BarIcon: View {
                     .resizable()
                     .interpolation(.high)
                     .aspectRatio(contentMode: .fit)
+                    .modifier(LightOnDark(active: invert))
                     .frame(height: min(image.size.height, 24))
                     .frame(minWidth: width == nil ? 22 : nil)
             } else {
@@ -545,10 +549,6 @@ struct ArrangePanelView: View {
     let onOpenItem: (MenuBarItem) -> Void
     let onOpenSettings: () -> Void
 
-    /// Pictures of icons look as they do in the menu bar, so the panel takes
-    /// the menu bar's look (light or dark), like Perch's bar.
-    @ObservedObject private var pictures: IconImages
-
     init(engine: LayoutEngine, preferences: Preferences, permissions: Permissions, images: IconImages,
          maxWidth: CGFloat, onOpenItem: @escaping (MenuBarItem) -> Void, onOpenSettings: @escaping () -> Void) {
         self.engine = engine
@@ -558,11 +558,6 @@ struct ArrangePanelView: View {
         self.maxWidth = maxWidth
         self.onOpenItem = onOpenItem
         self.onOpenSettings = onOpenSettings
-        self.pictures = images
-    }
-
-    private var hasPictures: Bool {
-        engine.items.contains { $0.isInMenuBar && pictures.image(for: $0) != nil }
     }
 
     var body: some View {
@@ -572,13 +567,7 @@ struct ArrangePanelView: View {
             .padding(8)
             .frame(minWidth: 280, alignment: .leading)
             .fixedSize()
-            .background(.regularMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5)
-            )
-            .modifier(MatchIconColors(images: pictures, active: hasPictures))
+            .perchSurface(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .contextMenu {
                 Button("Settings…", action: onOpenSettings)
                 Divider()
