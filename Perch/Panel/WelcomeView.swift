@@ -1,9 +1,9 @@
 import AppKit
 import SwiftUI
 
-/// The welcome window: shown the first time Perch runs, and again from
-/// Settings → Welcome tour. It teaches the whole app, one thing per page,
-/// with a button on most pages to try it right away.
+/// The Guide: shown the first time Perch runs, and again from Settings → Guide.
+/// Topics are listed on the left; pick any one to learn it, with a button on
+/// most to try it right away. Next steps through them in order, for a first run.
 @MainActor
 final class WelcomeWindowController {
     static let shownKey = "welcomeShown"
@@ -24,7 +24,7 @@ final class WelcomeWindowController {
         if window == nil {
             let hosting = NSHostingController(rootView: makeContent { [weak self] in self?.window?.close() })
             let window = NSWindow(contentViewController: hosting)
-            window.title = "Welcome to Perch"
+            window.title = "Perch Guide"
             window.styleMask = [.titled, .closable]
             window.titleVisibility = .hidden
             window.isReleasedWhenClosed = false
@@ -37,7 +37,7 @@ final class WelcomeWindowController {
             }
             self.window = window
         } else if let window, !window.isVisible {
-            // Start from the first page each time.
+            // Start from Welcome each time.
             window.contentViewController = NSHostingController(
                 rootView: makeContent { [weak self] in self?.window?.close() }
             )
@@ -57,15 +57,92 @@ struct WelcomeView: View {
     let onOpenSettings: () -> Void
     let onDone: () -> Void
 
-    static let size = CGSize(width: 640, height: 530)
+    /// The topic list, then the topic itself.
+    static let sidebarWidth: CGFloat = 190
+    static let pageWidth: CGFloat = 640
+    static let size = CGSize(width: sidebarWidth + 1 + pageWidth, height: 530)
 
     enum Page: Int, CaseIterable {
         case hello, access, hidden, arrange, spotlight, settings
+
+        var title: String {
+            switch self {
+            case .hello: "Welcome"
+            case .access: "Accessibility"
+            case .hidden: "Hidden Icons"
+            case .arrange: "Arrange"
+            case .spotlight: "Spotlight"
+            case .settings: "Settings"
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .hello: "hand.wave"
+            case .access: "lock.shield"
+            case .hidden: "eye.slash"
+            case .arrange: "arrow.left.and.right"
+            case .spotlight: "magnifyingglass"
+            case .settings: "gearshape"
+            }
+        }
     }
 
     @State private var page: Page = .hello
 
     var body: some View {
+        HStack(spacing: 0) {
+            sidebar
+            Divider()
+            topic
+        }
+        .frame(width: Self.size.width, height: Self.size.height)
+        .animation(.easeInOut(duration: 0.2), value: page)
+        .onAppear { permissions.refresh() }
+    }
+
+    // MARK: - Topics
+
+    private var sidebar: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(Page.allCases, id: \.self) { each in
+                Button { page = each } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: each.symbol)
+                            .font(.system(size: 13))
+                            .frame(width: 20)
+                            .foregroundStyle(each == page ? Color.white : Color.accentColor)
+                        Text(each.title)
+                            .font(.system(size: 13))
+                        Spacer(minLength: 0)
+                        if each == .access {
+                            // Whether it still needs doing.
+                            Circle()
+                                .fill(permissions.hasAccessibility ? Color.green : Color.orange)
+                                .frame(width: 7, height: 7)
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                    .frame(height: 30)
+                    .foregroundStyle(each == page ? Color.white : Color.primary)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(each == page ? Color.accentColor : Color.clear)
+                    )
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.top, 14)
+        .frame(width: Self.sidebarWidth)
+        .frame(maxHeight: .infinity)
+        .background(Color.primary.opacity(0.03))
+    }
+
+    private var topic: some View {
         VStack(spacing: 0) {
             ZStack {
                 LinearGradient(colors: [Color.accentColor.opacity(0.18), Color.accentColor.opacity(0.04)],
@@ -88,9 +165,7 @@ struct WelcomeView: View {
 
             footer
         }
-        .frame(width: Self.size.width, height: Self.size.height)
-        .animation(.easeInOut(duration: 0.2), value: page)
-        .onAppear { permissions.refresh() }
+        .frame(width: Self.pageWidth)
     }
 
     // MARK: - Pages
@@ -101,7 +176,7 @@ struct WelcomeView: View {
         case .hello:
             title("Welcome to Perch")
             para("Perch keeps your menu bar organized. Icons that don't fit, or that you choose to hide, stay out of view and remain one click away.")
-            para("Perch works with the menu bar macOS already provides. It never moves your pointer, and your apps never restart. This tour walks through each feature.")
+            para("Perch works with the menu bar macOS already provides. It never moves your pointer, and your apps never restart. Pick any topic on the left to see how it works, or choose Get Started to go through them in order.")
 
         case .access:
             title("Allow Accessibility access")
@@ -195,20 +270,10 @@ struct WelcomeView: View {
 
     // MARK: - Footer
 
+    /// Next, for going through every topic in order. Nothing makes you.
     private var footer: some View {
         HStack {
-            HStack(spacing: 7) {
-                ForEach(Page.allCases, id: \.self) { each in
-                    Circle()
-                        .fill(each == page ? Color.accentColor : Color.primary.opacity(0.2))
-                        .frame(width: 6, height: 6)
-                        .onTapGesture { page = each }
-                }
-            }
             Spacer()
-            if page != .hello {
-                Button("Back") { move(-1) }
-            }
             if page == .settings {
                 Button("Done", action: onDone)
                     .buttonStyle(.borderedProminent)
@@ -225,10 +290,11 @@ struct WelcomeView: View {
     }
 
     private var nextTitle: String {
+        let next = Page(rawValue: page.rawValue + 1)?.title ?? ""
         switch page {
-        case .hello: "Get Started"
-        case .access: permissions.hasAccessibility ? "Continue" : "Later"
-        default: "Continue"
+        case .hello: return "Get Started"
+        case .access where !permissions.hasAccessibility: return "Later"
+        default: return "Next: \(next)"
         }
     }
 

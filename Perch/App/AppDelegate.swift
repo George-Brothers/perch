@@ -158,7 +158,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.arrangePanel.toggle(anchor: menuBar.anchor)
         }
 
-        // First launch: the welcome tour, which also asks for Accessibility.
+        // First launch: the Guide, which also asks for Accessibility.
         // It counts as seen once it closes with Accessibility allowed, so
         // someone who goes off to allow it sees it again when they come back.
         welcome = WelcomeWindowController { [weak self] close in

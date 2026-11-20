@@ -30,8 +30,8 @@ Perch is a light menu bar manager for macOS. The goal: the menu bar macOS should
 | Spotlight | Every icon is a Core Spotlight item, re-indexed only when the set of icons changes. Picking one opens its menu, even when hidden. |
 | Shortcuts | App Intents: Show Hidden Icons, Arrange Menu Bar, Open Menu Bar Icon (any icon, by name). |
 | Spacing | Slider for `NSStatusItemSpacing` and `NSStatusItemSelectionPadding`. Apply restarts Control Center, so Apple's icons change at once; other apps pick it up the next time they open. Perch never restarts them. |
-| Settings | The gear in Arrange (or ⌘, while Arrange is open). One short page: open at login, what Perch shows in the bar, where Arrange opens, exact pictures, icon spacing, version, Welcome Tour and Quit. |
-| Welcome tour | On first launch: six pages in a window (what Perch is, Accessibility, click for hidden icons, right-click to arrange, Spotlight, where Settings are), each with a button to try it. Reopen from Settings. |
+| Settings | The gear in Arrange (or ⌘, while Arrange is open). One short page: open at login, what Perch shows in the bar, where Arrange opens, exact pictures, icon spacing, version, Guide and Quit. |
+| Guide | On first launch, and from Settings → Guide. A window with topics on the left (Welcome, Accessibility, Hidden Icons, Arrange, Spotlight, Settings); pick any to learn it, most with a button to try it. Next steps through them in order. |
 
 ## Next
 
