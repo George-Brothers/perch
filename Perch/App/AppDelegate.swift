@@ -50,7 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 preferences: preferences,
                 permissions: permissions,
                 images: images,
-                maxWidth: min((menuBar.screen?.visibleFrame.width ?? 900) - 60, 900),
+                overBar: { self?.overBarGeometry() },
                 onOpenItem: { item in
                     self?.arrangePanel.close()
                     Task { if await self?.open(item) == false { NSSound.beep() } }
@@ -58,8 +58,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 onOpenSettings: {
                     self?.arrangePanel.close()
                     self?.settings.show()
-                }
+                },
+                onDone: { self?.arrangePanel.close() }
             ))
+        }
+        // Over the menu bar, Arrange covers the bar from the screen's left edge.
+        arrangePanel.topLeft = { [weak self] in
+            guard let self, preferences.arrangeStyle == .over, let screen = self.menuBar.screen else { return nil }
+            return NSPoint(x: screen.frame.minX, y: screen.frame.maxY)
         }
 
         // The drawer shows pictures of hidden icons. macOS can only picture icons
@@ -205,6 +211,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Opens Arrange (from Spotlight); running it again leaves it open.
+    /// Where Arrange goes over the menu bar: from the left edge (or the notch)
+    /// to just left of the clock and Control Center, which stay visible.
+    private func overBarGeometry() -> OverBarGeometry? {
+        guard let screen = menuBar.screen else { return nil }
+        let left = screen.frame.minX
+        let fixed = engine.items.filter {
+            $0.isInMenuBar && $0.isFixed && $0.frame.minX >= left && $0.frame.minX < screen.frame.maxX
+        }
+        return OverBarGeometry(
+            width: screen.frame.width,
+            barHeight: MenuBarGeometry.menuBarHeight(for: screen),
+            bandStart: screen.auxiliaryTopRightArea.map { $0.minX - left } ?? 0,
+            bandEnd: (fixed.map(\.frame.minX).min() ?? screen.frame.maxX) - left - 4
+        )
+    }
+
     func showArrange() {
         guard !arrangePanel.isOpen else { return }
         closePanels(except: .arrange)

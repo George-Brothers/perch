@@ -66,6 +66,21 @@ enum IconPriority: String, CaseIterable, Identifiable {
     }
 }
 
+/// Where Arrange opens: a bar under the menu bar, or over the menu bar itself.
+enum ArrangeStyle: String, CaseIterable, Identifiable {
+    case below
+    case over
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .below: "Below the menu bar"
+        case .over: "Over the menu bar"
+        }
+    }
+}
+
 /// User settings, stored in UserDefaults. Views bind to it directly.
 @MainActor
 final class Preferences: ObservableObject {
@@ -77,6 +92,7 @@ final class Preferences: ObservableObject {
         static let priorities = "iconPriorities"
         static let drawerEnabled = "drawerEnabled"
         static let hiddenOrder = "hiddenOrder"
+        static let arrangeStyle = "arrangeStyle"
     }
 
     private let defaults: UserDefaults
@@ -100,6 +116,11 @@ final class Preferences: ObservableObject {
         didSet { defaults.set(drawerEnabled, forKey: Key.drawerEnabled) }
     }
 
+    /// Where Arrange opens.
+    @Published var arrangeStyle: ArrangeStyle {
+        didSet { defaults.set(arrangeStyle.rawValue, forKey: Key.arrangeStyle) }
+    }
+
     /// The order of icons in Perch's bar, left to right, by `MenuBarItem.key`.
     @Published var hiddenOrder: [String] {
         didSet { defaults.set(hiddenOrder, forKey: Key.hiddenOrder) }
@@ -118,6 +139,7 @@ final class Preferences: ObservableObject {
         priorities = stored.compactMapValues(IconPriority.init(stored:)).filter { $0.value == .hidden }
         drawerEnabled = defaults.bool(forKey: Key.drawerEnabled)
         hiddenOrder = defaults.stringArray(forKey: Key.hiddenOrder) ?? []
+        arrangeStyle = ArrangeStyle(rawValue: defaults.string(forKey: Key.arrangeStyle) ?? "") ?? .below
     }
 
     func priority(for key: String) -> IconPriority {

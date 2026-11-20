@@ -35,6 +35,10 @@ final class PanelController {
         self.makeContent = makeContent
     }
 
+    /// Where the panel's top-left corner goes, instead of hanging from the
+    /// anchor (Arrange over the menu bar covers the bar from the left edge).
+    var topLeft: (() -> NSPoint?)?
+
     /// Runs each time the panel opens. Defaults to rescanning the icons.
     var onOpen: (() -> Void)?
 
@@ -113,6 +117,11 @@ final class PanelController {
 
     private func position(_ panel: NSPanel) {
         let size = panel.frame.size
+        if let corner = topLeft?() {
+            let origin = NSPoint(x: corner.x.rounded(), y: (corner.y - size.height).rounded())
+            if panel.frame.origin != origin { panel.setFrameOrigin(origin) }
+            return
+        }
         if let pinned, let visible = (panel.screen ?? NSScreen.main)?.visibleFrame {
             let x = min(max(pinned.right - size.width, visible.minX + 8), visible.maxX - size.width - 8)
             let origin = NSPoint(x: x.rounded(), y: (pinned.top - size.height).rounded())

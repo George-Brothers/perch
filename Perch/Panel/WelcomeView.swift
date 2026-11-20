@@ -129,8 +129,8 @@ struct WelcomeView: View {
 
         case .arrange:
             title("Arrange your menu bar")
-            para("Right-click any empty area of the menu bar to open Arrange. It shows two rows, the icons in your menu bar and the icons that are hidden. Drag an icon to any position in either row.")
-            para("Order sets priority. When the menu bar runs out of space, icons on the left move to Hidden first. Changes take effect when you close Arrange, and Apple's icons briefly redraw.")
+            para("Right-click any empty area of the menu bar to open Arrange. It shows your menu bar as one strip: hidden icons are dimmed, left of the line, and the icons in your menu bar are to its right. Drag an icon across the line to hide or show it, or drag the line itself.")
+            para("Order sets priority. When the menu bar runs out of space, icons on the left move to Hidden first. Changes take effect when you close Arrange, and Apple's icons briefly redraw. In Settings, you can have Arrange open over the menu bar instead.")
             tryButton("Open Arrange", action: onOpenArrange)
 
         case .spotlight:
@@ -140,7 +140,7 @@ struct WelcomeView: View {
 
         case .settings:
             title("Settings")
-            para("To open Settings, click the gear at the left end of Arrange. You can also press ⌘, while Arrange is open, or open Perch from the Applications folder.")
+            para("To open Settings, click the gear in Arrange. You can also press ⌘, while Arrange is open, or open Perch from the Applications folder.")
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 10) {
                 GridRow {
                     Text("Open at login").foregroundStyle(.secondary)
@@ -334,53 +334,40 @@ private struct MiniDrawer: View {
     }
 }
 
-/// Arrange: the bar row and the Hidden row, with an icon being dragged down.
+/// Arrange: one strip, hidden icons dimmed left of the line, with an icon
+/// being dragged across it.
 private struct MiniArrange: View {
     private let shown = ["chart.bar.fill", "wifi", "battery.75percent"]
     private let hidden = ["cloud", "camera.viewfinder"]
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 16) {
             Image(systemName: "gearshape")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
-                .frame(width: 20)
-            VStack(alignment: .trailing, spacing: 6) {
-                row(shown, fill: 0.10)
-                row(hidden, fill: 0.04, label: "Hidden")
-            }
+            ForEach(hidden, id: \.self) { Image(systemName: $0).font(.system(size: 12)).opacity(0.5) }
+            Capsule().fill(Color.white.opacity(0.5)).frame(width: 2, height: 16)
+            ForEach(shown, id: \.self) { Image(systemName: $0).font(.system(size: 12)) }
         }
-        .padding(8)
-        .frame(width: 340)
-        .perchSurface(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(.horizontal, 16)
+        .frame(height: 36)
+        .perchSurface(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .shadow(color: .black.opacity(0.2), radius: 5, y: 2)
         .overlay(alignment: .topLeading) {
-            // An icon on its way from the bar to Hidden.
+            // An icon on its way across the line, into Hidden.
             HStack(spacing: 2) {
+                Image(systemName: "arrow.down.left")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
                 Image(systemName: "waveform")
                     .font(.system(size: 12))
                     .frame(width: 26, height: 22)
                     .background(Color(white: 0.24), in: RoundedRectangle(cornerRadius: 6))
                     .shadow(color: .black.opacity(0.35), radius: 3, y: 1)
-                Image(systemName: "arrow.down.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Color.accentColor)
             }
-            .offset(x: 170, y: 22)
+            .offset(x: 118, y: 30)
         }
-    }
-
-    private func row(_ symbols: [String], fill: Double, label: String? = nil) -> some View {
-        HStack(spacing: 16) {
-            if let label {
-                Text(label).font(.system(size: 10)).foregroundStyle(.tertiary)
-            }
-            Spacer()
-            ForEach(symbols, id: \.self) { Image(systemName: $0).font(.system(size: 12)) }
-        }
-        .padding(.horizontal, 12)
-        .frame(height: 30)
-        .background(Color.white.opacity(fill), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .padding(.bottom, 24)
     }
 }
 
@@ -435,13 +422,17 @@ private struct MiniSettings: View {
                         .foregroundStyle(.white)
                         .frame(width: 24, height: 24)
                         .background(Color.accentColor, in: Circle())
-                    VStack(spacing: 5) {
-                        RoundedRectangle(cornerRadius: 5).fill(Color.white.opacity(0.10)).frame(width: 70, height: 20)
-                        RoundedRectangle(cornerRadius: 5).fill(Color.white.opacity(0.04)).frame(width: 70, height: 20)
+                    HStack(spacing: 10) {
+                        ForEach(["cloud", "camera.viewfinder"], id: \.self) {
+                            Image(systemName: $0).font(.system(size: 11)).opacity(0.5)
+                        }
+                        Capsule().fill(Color.white.opacity(0.5)).frame(width: 2, height: 14)
+                        Image(systemName: "wifi").font(.system(size: 11))
                     }
+                    .padding(.trailing, 6)
                 }
-                .padding(7)
-                .perchSurface(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .padding(6)
+                .perchSurface(RoundedRectangle(cornerRadius: 18, style: .continuous))
                 .shadow(color: .black.opacity(0.2), radius: 4, y: 2)
             }
 
