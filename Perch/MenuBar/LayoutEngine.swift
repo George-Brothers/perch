@@ -144,8 +144,9 @@ final class LayoutEngine: ObservableObject {
             case .perch: return .perch
             case .fixed: return nil
             case .icon(let key):
-                guard items.first(where: { $0.key == key })?.isMovable == true,
+                guard let item = items.first(where: { $0.key == key }), item.isMovable,
                       preferences.priority(for: key) == .shown else { return nil }
+                if staysPut(item) { return nil }
                 return .icon(key)
             }
         }
@@ -153,6 +154,14 @@ final class LayoutEngine: ObservableObject {
 
     /// Adds icons that appeared since the moves were queued, where they are
     /// now (as Arrange shows them), so a drop next to one lands there.
+    /// An icon with no saved spot at all (macOS's Now Playing, say) that
+    /// showed up among the hidden ones stays there: Perch can't move it, and
+    /// asking for it shown would block every other move. Its priority isn't
+    /// touched either, so it isn't marked hidden just for being left out.
+    private func staysPut(_ item: MenuBarItem) -> Bool {
+        item.section == .hidden && slots[item.key] == nil
+    }
+
     private func withNewcomers(_ order: [Spot], into members: inout Set<String>) -> [Spot] {
         var order = order
         func minX(_ spot: Spot) -> CGFloat? {
@@ -163,7 +172,7 @@ final class LayoutEngine: ObservableObject {
         }
         for item in items.sorted(by: { $0.frame.minX < $1.frame.minX })
         where item.isInMenuBar && item.isMovable && !members.contains(item.key)
-            && preferences.priority(for: item.key) == .shown {
+            && preferences.priority(for: item.key) == .shown && !staysPut(item) {
             let index = order.firstIndex { (minX($0) ?? -.infinity) > item.frame.minX } ?? order.count
             order.insert(.icon(item.key), at: index)
             members.insert(item.key)
@@ -733,6 +742,7 @@ final class LayoutEngine: ObservableObject {
     private func setPriorities(_ order: [Spot], in items: [MenuBarItem], members: Set<String>? = nil) {
         let members = members ?? queuedFrom
         for item in items where item.isInMenuBar && item.isMovable && members.contains(item.key) {
+            if staysPut(item) && !order.contains(.icon(item.key)) { continue }
             let priority: IconPriority = order.contains(.icon(item.key)) ? .shown : .hidden
             if preferences.priority(for: item.key) != priority { preferences.setPriority(priority, for: item.key) }
         }
