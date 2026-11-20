@@ -368,10 +368,19 @@ final class LayoutEngine: ObservableObject {
         // Usually once; twice if Perch's item had to move to the cut first.
         var moved = false
         for _ in 0..<3 {
+            let before = (menuBar.dividerFrame(), menuBar.perchFrame())
             guard placeDivider(in: current) else { break }
             moved = true
             await menuBar.settle()
             current = await settledScan()
+            // macOS put it right back: the spot Perch chose is on the wrong
+            // side of an icon whose position it had to guess. Trying again
+            // this pass would only make the same guess.
+            if let divider = before.0, let after = menuBar.dividerFrame(), abs(after.maxX - divider.maxX) < 1,
+               before.1?.minX == menuBar.perchFrame()?.minX {
+                log.notice("the divider landed where it was; trying again on the next change")
+                break
+            }
         }
         if !moved { await scan() }
         return true
@@ -449,9 +458,9 @@ final class LayoutEngine: ObservableObject {
         let right = rightEntry?.position
         switch (left, right) {
         case let (l?, r?) where leftEntry?.isGuess == true && rightEntry?.isGuess != true:
-            return r + min(0.05, (l - r) / 2)
+            return r + min(0.05, (l - r) / 16)
         case let (l?, r?) where rightEntry?.isGuess == true && leftEntry?.isGuess != true:
-            return l - min(0.05, (l - r) / 2)
+            return l - min(0.05, (l - r) / 16)
         case let (l?, r?): return r + min(1, (l - r) / 2)
         case let (nil, r?): return r + 1
         case let (l?, nil): return l - 1

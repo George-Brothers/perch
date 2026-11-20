@@ -535,16 +535,30 @@ final class MenuBarController: NSObject, ObservableObject {
         DispatchQueue.main.async { [weak self] in self?.waitForPlacement() }
     }
 
-    /// Waits until the divider has its new frame after a move: a new status
-    /// item's frame is empty or stale for a moment.
+    /// Waits until the divider has its new frame after a move. A new status
+    /// item first sits off the menu bar for about half a second, then is laid
+    /// out for a while as if the old one were still there, so a frame counts
+    /// only once it's in a menu bar and has held still for 0.6 s (2.5 s at most).
     func settle() async {
         var last: NSRect?
-        for _ in 0..<20 {
+        var steady = 0
+        for _ in 0..<50 {
             try? await Task.sleep(for: .milliseconds(50))
             let now = screenFrame(of: hiddenDivider)
-            if let now, now == last { return }
+            if let now, now == last, Self.isOnMenuBar(now) {
+                steady += 1
+                if steady >= 12 { return }
+            } else {
+                steady = 0
+            }
             last = now
         }
+    }
+
+    /// Whether a frame (top-left origin) sits along the top of a screen.
+    private static func isOnMenuBar(_ frame: CGRect) -> Bool {
+        let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
+        return NSScreen.screens.contains { abs((primaryHeight - $0.frame.maxY) - frame.minY) < 2 }
     }
 
     private func waitForPlacement() {
