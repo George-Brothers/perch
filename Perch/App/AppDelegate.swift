@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var drawer: DrawerController!
     private var guide: HostedWindow!
     private var setup: HostedWindow!
+    private var setupStart: SetupView.Step = .welcome
     private let images = IconImages()
     private var spotlight: SpotlightIndex!
     private var cancellables = Set<AnyCancellable>()
@@ -54,7 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 overBar: { self?.overBarGeometry() },
                 onOpenItem: { item in
                     self?.arrangePanel.close()
-                    Task { if await self?.open(item) == false { NSSound.beep() } }
+                    Task { await self?.open(item) }
                 },
                 onOpenSettings: {
                     self?.arrangePanel.close()
@@ -178,6 +179,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             AnyView(SetupView(
                 permissions: permissions,
                 preferences: preferences,
+                startAt: self?.setupStart ?? .welcome,
                 onOpenGuide: { self?.showGuide() },
                 onDone: close
             ))
@@ -193,8 +195,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .dropFirst()
             .filter { $0 }
             .sink { [weak self] _ in
-                // Back from System Settings with Accessibility on: bring setup forward.
+                // Back from System Settings with Accessibility on: bring setup
+                // forward, at the step that asked (if it was closed meanwhile).
                 guard !UserDefaults.standard.bool(forKey: Self.setupDoneKey) else { return }
+                self?.setupStart = .access
                 self?.showSetup()
             }
             .store(in: &cancellables)
@@ -230,14 +234,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if menuBar.toggleDrawer?() != true { showArrange() }
     }
 
-    /// Opens Arrange (from Spotlight); running it again leaves it open.
     /// Where Arrange goes over the menu bar: from the left edge (or the notch)
     /// to just left of the clock and Control Center, which stay visible.
     private func overBarGeometry() -> OverBarGeometry? {
         guard let screen = menuBar.screen else { return nil }
         let left = screen.frame.minX
         let fixed = engine.items.filter {
-            $0.isInMenuBar && $0.isFixed && $0.frame.minX >= left && $0.frame.minX < screen.frame.maxX
+            $0.isInMenuBar && $0.isFixed && MenuBarGeometry.isInMenuBar($0.frame, of: screen)
         }
         return OverBarGeometry(
             width: screen.frame.width,
@@ -247,6 +250,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
+    /// Opens Arrange (from Spotlight); running it again leaves it open.
     func showArrange() {
         guard !arrangePanel.isOpen else { return }
         closePanels(except: .arrange)
@@ -261,32 +265,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func openIcon(key: String) async -> OpenResult {
         guard Permissions.shared.hasAccessibility else { return .noPermission }
         guard let item = await icons().first(where: { $0.key == key }) else { return .gone }
-        return await open(item) ? .opened : .busy
+        await open(item)
+        return .opened
     }
 
-    enum OpenResult { case opened, gone, busy, noPermission }
+    enum OpenResult { case opened, gone, noPermission }
 
     /// Opens an icon's menu. A hidden icon opens right where you are (under
     /// Perch's bar, or under the menu bar), without coming into the menu bar.
     /// Only if that fails does it come out just until its menu closes.
-    @discardableResult
-    private func open(_ item: MenuBarItem, at point: NSPoint? = nil) async -> Bool {
+    private func open(_ item: MenuBarItem, at point: NSPoint? = nil) async {
         guard item.section == .hidden else {
             ItemOpener.open(item)
-            return true
+            return
         }
-        if await MenuMirror.open(item, at: point ?? defaultMenuPoint()) != .failed { return true }
-        return menuBar.openTemporarily(item)
+        if await MenuMirror.open(item, at: point ?? defaultMenuPoint()) != .failed { return }
+        menuBar.openTemporarily(item)
     }
 
     /// Opens an icon clicked in Perch's bar. True when Perch's bar should
     /// close: after you pick something, or if the icon had to come out into
     /// the menu bar. Closing its menu without picking leaves the bar open.
     private func openFromBar(_ item: MenuBarItem, at point: NSPoint) async -> Bool {
-        switch await MenuMirror.open(item, at: point) {
+        // Wanted only while this opening of Perch's bar lasts.
+        let opening = drawer.generation
+        let stillWanted = { [weak self] in self?.drawer.isOpen == true && self?.drawer.generation == opening }
+        switch await MenuMirror.open(item, at: point, stillWanted: stillWanted) {
         case .picked: return true
         case .dismissed, .panel: return false
         case .failed:
+            guard stillWanted() else { return false }
             menuBar.openTemporarily(item)
             return true
         }
@@ -314,9 +322,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
+    private var isQuitting = false
+
     /// When Spotlight last opened an icon, so the reopen that comes with it
     /// doesn't also show Settings.
     private var openedFromSpotlight: Date?
+
+    /// A move that's under way finishes before Perch quits (25 s unlocked, two minutes at most): its
+    /// new spots are already saved, and quitting midway would leave them for
+    /// the next restart to apply unchecked. Closing Arrange lets held moves go.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard engine != nil, !isQuitting else { return .terminateNow }
+        arrangePanel.close()
+        // Without Accessibility, held moves can't run; don't wait on them.
+        let canFinish = engine.isArranging || (engine.hasQueuedMoves && Permissions.shared.hasAccessibility)
+        guard canFinish else { return .terminateNow }
+        // Logging out, restarting or shutting down: don't hold that up. The
+        // saved spots apply when Control Center starts again.
+        let reason = NSAppleEventManager.shared().currentAppleEvent?.attributeDescriptor(forKeyword: kAEQuitReason)
+        guard reason == nil else { return .terminateNow }
+        isQuitting = true
+        Task { @MainActor in
+            // Time spent locked doesn't count (the move is waiting for the
+            // unlock), but give up after two minutes regardless.
+            var waited = 0
+            let started = Date()
+            while waited < 125, Date().timeIntervalSince(started) < 120,
+                  engine.isArranging || (engine.hasQueuedMoves && Permissions.shared.hasAccessibility) {
+                try? await Task.sleep(for: .milliseconds(200))
+                if !AppRestarter.screenIsLocked { waited += 1 }
+            }
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
 
     /// Opening Perch again (from Finder, Spotlight or the Dock) shows Settings,
     /// so there is always a way back in even if the menu bar icon is out of view.

@@ -14,8 +14,9 @@ final class DrawerController {
     private var outsideClickMonitor: Any?
     private var keyMonitor: Any?
     private var resizeObserver: NSObjectProtocol?
-    /// Bumped on every open, so a fade-out that finishes late doesn't hide a reopened drawer.
-    private var generation = 0
+    /// Bumped on every open, so a fade-out that finishes late doesn't hide a
+    /// reopened drawer, and a click from an earlier opening can tell it's stale.
+    private(set) var generation = 0
 
     /// Opens the icon's own menu with its top-left corner at the point, and
     /// returns once it's done: true if Perch's bar should close too (you picked
@@ -187,19 +188,19 @@ struct DrawerView: View {
         engine.inHiddenOrder(engine.items.filter { $0.section == .hidden })
     }
 
+    /// How wide the icons are, to scroll them when they don't fit the screen.
+    @State private var iconsWidth: CGFloat = 0
+
     var body: some View {
-        HStack(spacing: 0) {
-            if hidden.isEmpty {
-                Text(engine.hasScanned ? "No hidden icons" : " ")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 10)
+        let room = engine.barScreenWidth - 24
+        Group {
+            if iconsWidth > room {
+                // Starts at the right end, nearest the menu bar's own icons.
+                ScrollView(.horizontal, showsIndicators: false) { icons }
+                    .defaultScrollAnchor(.trailing)
+                    .frame(width: room)
             } else {
-                ForEach(hidden) { item in
-                    DrawerIcon(item: item, image: images.image(for: item), invert: !images.iconsAreLight,
-                               isActive: state.activeKey == item.key, onOpen: onOpen)
-                        .contextMenu { priorityMenu(for: item) }
-                }
+                icons
             }
         }
         .frame(minHeight: 24)
@@ -208,19 +209,51 @@ struct DrawerView: View {
         .perchSurface(Capsule(style: .continuous))
         .fixedSize()
         .padding(1)
+        .onPreferenceChange(DrawerIconsWidth.self) { iconsWidth = $0 }
+    }
+
+    private var icons: some View {
+        HStack(spacing: 0) {
+            if hidden.isEmpty {
+                Text(engine.hasScanned ? "No hidden icons" : " ")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 10)
+            } else {
+                ForEach(hidden) { item in
+                    DrawerIcon(item: item, image: images.image(for: item), invert: !images.isLight(item),
+                               isActive: state.activeKey == item.key, onOpen: onOpen)
+                        .contextMenu { priorityMenu(for: item) }
+                }
+            }
+        }
+        .fixedSize()
+        .background(GeometryReader { geometry in
+            Color.clear.preference(key: DrawerIconsWidth.self, value: geometry.size.width)
+        })
     }
 
     @ViewBuilder
     private func priorityMenu(for item: MenuBarItem) -> some View {
         Text(item.displayName)
         Divider()
-        Button("Show in Menu Bar") {
-            onClose()
-            engine.place(item, .before(.divider, shown: true))
+        if engine.isWaitingForRoom(item) {
+            // Already set to show; it's here because the menu bar is full.
+            Text("No room in the menu bar")
+        } else {
+            Button("Show in Menu Bar") {
+                onClose()
+                engine.place(item, .before(.divider, shown: true))
+            }
         }
         Divider()
         Button("Arrange Icons…", action: onArrange)
     }
+}
+
+private struct DrawerIconsWidth: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
 
 /// What Perch's bar is showing right now.

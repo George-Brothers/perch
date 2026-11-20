@@ -63,7 +63,10 @@ enum MenuMirror {
 
     /// Opens a hidden icon with its menu's top-left corner at `point` (screen
     /// coordinates, bottom-left origin). Returns once its menu has closed.
-    static func open(_ item: MenuBarItem, at point: NSPoint) async -> Outcome {
+    /// `stillWanted` is asked once the menu is read: Perch's bar may have
+    /// closed meanwhile, and then the copy shouldn't pop up on its own.
+    static func open(_ item: MenuBarItem, at point: NSPoint,
+                     stillWanted: () -> Bool = { true }) async -> Outcome {
         let element = item.element
         let pid = item.pid
         let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
@@ -78,12 +81,14 @@ enum MenuMirror {
         }.value
         switch result {
         case .menu(let entries):
+            guard stillWanted() else { return .dismissed }
             return show(entries, for: item, at: point) ? .picked : .dismissed
         case .panel:
             return .panel
         case .nothing:
             log.notice("\(item.displayName, privacy: .public) opened nothing Perch could show")
-            return .failed
+            // Closed meanwhile: don't fall back to revealing the menu bar.
+            return stillWanted() ? .failed : .dismissed
         }
     }
 
@@ -102,12 +107,14 @@ enum MenuMirror {
             if let menu = AX.elements(element, kAXChildrenAttribute).first(where: { AX.string($0, kAXRoleAttribute) == "AXMenu" }) {
                 let entries = read(menu, path: [], titles: [], levels: [])
                 _ = AXUIElementPerformAction(menu, kAXCancelAction as CFString)
-                return .menu(entries)
+                // Custom views with no titles can't be copied: show the real one instead.
+                return entries.contains { !$0.title.isEmpty || !$0.children.isEmpty } ? .menu(entries) : .nothing
             }
             // A panel that just opened off screen: bring it under Perch's bar.
             for window in AX.elements(app, kAXWindowsAttribute) where !windowsBefore.contains(CFHash(window)) {
                 guard let frame = AX.frame(of: window), !screens.contains(where: { $0.intersects(frame) }) else { continue }
-                let screen = screens.min { abs($0.minX - panelOrigin.x) < abs($1.minX - panelOrigin.x) } ?? .zero
+                let screen = screens.first { $0.contains(panelOrigin) }
+                    ?? screens.first { $0.minX <= panelOrigin.x && panelOrigin.x < $0.maxX } ?? screens.first ?? .zero
                 var origin = CGPoint(x: min(panelOrigin.x, screen.maxX - frame.width - 8), y: panelOrigin.y)
                 origin.x = max(origin.x, screen.minX + 8)
                 if let value = AXValueCreate(.cgPoint, &origin),
@@ -122,7 +129,7 @@ enum MenuMirror {
 
     private nonisolated static func read(_ menu: AXUIElement, path: [Int], titles: [String], levels: [[String]]) -> [Entry] {
         let children = AX.elements(menu, kAXChildrenAttribute)
-        let levels = levels + [children.map(signature)]
+        let levels = levels + [children.map(markedSignature)]
         return children.enumerated().map { index, element in
             let title = AX.string(element, kAXTitleAttribute) ?? ""
             let enabled = AX.raw(element, kAXEnabledAttribute) as? Bool ?? true
@@ -205,7 +212,6 @@ enum MenuMirror {
         }
     }
 
-    /// Opens the real menu off screen again and presses the item at `path`.
     /// An item's title and shortcut: two items can share a title ("Disconnect")
     /// but not usually both. A checkmark isn't part of it; it flips.
     private nonisolated static func signature(_ element: AXUIElement) -> String {
@@ -215,6 +221,22 @@ enum MenuMirror {
         return "\(title)\u{1F}\(key)\u{1F}\(key.isEmpty ? 0 : modifiers)"
     }
 
+    /// The same plus the checkmark and, for a submenu, what's in it, for
+    /// telling twins apart: if two "Disconnect" rows (or two "Connection"
+    /// submenus) swapped, only these show it.
+    private nonisolated static func markedSignature(_ element: AXUIElement) -> String {
+        let marked = !(AX.string(element, "AXMenuItemMarkChar") ?? "").isEmpty
+        let submenu = AX.elements(element, kAXChildrenAttribute).first { AX.string($0, kAXRoleAttribute) == "AXMenu" }
+        let inside = submenu.map { AX.elements($0, kAXChildrenAttribute).map(signature).joined(separator: "\u{1E}") } ?? ""
+        return signature(element) + "\u{1F}" + (marked ? "1" : "0") + "\u{1F}" + inside
+    }
+
+    /// Back to just the title and shortcut.
+    private nonisolated static func unmarked(_ signature: String) -> String {
+        signature.split(separator: "\u{1F}", omittingEmptySubsequences: false).prefix(3).joined(separator: "\u{1F}")
+    }
+
+    /// Opens the real menu off screen again and presses the item at `path`.
     private nonisolated static func press(path: [Int], titles: [String], levels: [[String]], in element: AXUIElement) {
         AXUIElementSetMessagingTimeout(element, 0.3)
         _ = AXUIElementPerformAction(element, kAXPressAction as CFString)
@@ -236,14 +258,16 @@ enum MenuMirror {
             // isn't it). With no title, or twins, only if this menu is exactly
             // as copied. Never a guess.
             let title = depth < titles.count ? titles[depth] : ""
-            let copied = depth < levels.count ? levels[depth] : []
+            let copiedMarked = depth < levels.count ? levels[depth] : []
+            let copied = copiedMarked.map(unmarked)
             let picked = index < copied.count ? copied[index] : nil
-            let now = items.map(signature)
+            let nowMarked = items.map(markedSignature)
+            let now = nowMarked.map(unmarked)
             let matches = items.indices.filter { now[$0] == picked }
             var found: AXUIElement?
             if !title.isEmpty, let picked, matches.count == 1, copied.filter({ $0 == picked }).count == 1 {
                 found = items[matches[0]]
-            } else if now == copied, index < items.count {
+            } else if nowMarked == copiedMarked, index < items.count {
                 found = items[index]
             }
             guard let next = found else { break }

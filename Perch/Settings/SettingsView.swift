@@ -96,6 +96,10 @@ struct SettingsView: View {
             .padding(.bottom, 16)
         }
         .frame(width: 420)
+        // Back from approving it in Login Items.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            refreshLoginState()
+        }
         .onAppear {
             refreshLoginState()
             permissions.refresh()

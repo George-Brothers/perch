@@ -207,15 +207,24 @@ enum AppRestarter {
         var saidWaiting = false
         while true {
             // A time in the future means the clock changed; don't wait on it.
-            if let started = lastRestart, Date().timeIntervalSince(started) >= 0,
+            // Count from Control Center's own launch too, in case it came back
+            // later than the last restart was watched for.
+            if let started = [lastRestart, running()?.launchDate].compactMap({ $0 }).max(),
+               Date().timeIntervalSince(started) >= 0,
                Date().timeIntervalSince(started) < 10.5 {
                 try? await Task.sleep(for: .seconds(10.5 - Date().timeIntervalSince(started)))
                 continue
             }
-            // That wait can be long; don't close a menu you opened meanwhile,
-            // or restart while the screen is locked.
-            if MenuBarGeometry.isMenuOpen() || screenIsLocked {
-                if !saidWaiting { log.notice("restart waiting: a menu is open or the screen is locked") }
+            // That wait can be long; don't restart while the screen is
+            // locked (wait for the unlock, which can be overnight), or close
+            // a menu you opened meanwhile (menus close soon; check twice a second).
+            if screenIsLocked {
+                log.notice("restart waiting for the screen to unlock")
+                await waitForUnlock()
+                continue
+            }
+            if MenuBarGeometry.isMenuOpen() {
+                if !saidWaiting { log.notice("restart waiting: a menu is open") }
                 saidWaiting = true
                 try? await Task.sleep(for: .milliseconds(500))
                 continue
@@ -229,10 +238,43 @@ enum AppRestarter {
         for _ in 0..<60 where !app.isTerminated { try? await Task.sleep(for: .milliseconds(50)) }
         for _ in 0..<240 {
             if let next = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.controlcenter").first,
-               next.processIdentifier != app.processIdentifier, next.isFinishedLaunching { break }
+               next.processIdentifier != app.processIdentifier, next.isFinishedLaunching {
+                // launchd counts its 10 s from the new launch, so the spacing does too.
+                lastRestart = Date()
+                break
+            }
             try? await Task.sleep(for: .milliseconds(50))
         }
         try? await Task.sleep(for: .milliseconds(300))
+    }
+
+    /// Waits for the screen to unlock; returns at once if it isn't locked.
+    static func waitForUnlock() async {
+        // Listen before looking, so an unlock in between isn't missed. A slow
+        // check once a minute covers a notice that never comes.
+        let center = DistributedNotificationCenter.default()
+        let wakes = AsyncStream<Void> { continuation in
+            let observer = center.addObserver(forName: .init("com.apple.screenIsUnlocked"), object: nil,
+                                              queue: nil) { _ in continuation.yield() }
+            let ticker = Task {
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(60))
+                    continuation.yield()
+                }
+            }
+            continuation.onTermination = { _ in
+                center.removeObserver(observer)
+                ticker.cancel()
+            }
+        }
+        guard screenIsLocked else { return }
+        for await _ in wakes {
+            // The lock flag can lag the notice by a moment.
+            for _ in 0..<6 where screenIsLocked {
+                try? await Task.sleep(for: .milliseconds(500))
+            }
+            if !screenIsLocked { return }
+        }
     }
 
     /// Whether the login window is covering the screen.

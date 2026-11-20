@@ -23,13 +23,11 @@ final class LayoutEngine: ObservableObject {
     private let log = Logger(subsystem: "com.georgebrothers.perch", category: "layout")
     private var cancellables = Set<AnyCancellable>()
     private var observers: [NSObjectProtocol] = []
+    private var appsObservation: NSKeyValueObservation?
     private var pendingArrange: DispatchWorkItem?
     private var arrangeAgain = false
     /// How many times in a row a pass waited for a menu or the mouse.
     private var deferrals = 0
-    /// The display layout at the last display-change trigger.
-    private var lastScreenFrames: [CGRect] = NSScreen.screens.map(\.frame)
-
 
     init(preferences: Preferences, permissions: Permissions, menuBar: MenuBarController) {
         // Moves no longer wait for an app's next launch; drop what older versions saved.
@@ -38,14 +36,6 @@ final class LayoutEngine: ObservableObject {
         self.permissions = permissions
         self.menuBar = menuBar
         observeTriggers()
-    }
-
-    func priority(of item: MenuBarItem) -> IconPriority {
-        preferences.priority(for: item.key)
-    }
-
-    func setPriority(_ priority: IconPriority, for item: MenuBarItem) {
-        preferences.setPriority(priority, for: item.key)
     }
 
     /// Something in the shown part of the bar that Arrange can place.
@@ -79,6 +69,9 @@ final class LayoutEngine: ObservableObject {
     func hold(_ on: Bool, for holder: Holder) {
         let wasHolding = holdsMoves
         if on { holders.insert(holder) } else { holders.remove(holder) }
+        // You've seen it. (A pass that runs after Arrange closes can still
+        // leave one for next time.)
+        if !on, holder == .arrange { notice = nil }
         if wasHolding, !holdsMoves, queued != nil { scheduleArrange(after: 0.05) }
     }
     private var holders: Set<Holder> = []
@@ -203,6 +196,22 @@ final class LayoutEngine: ObservableObject {
         isArranging ? items : await scan()
     }
 
+    /// True when an icon set to show is hidden only because the menu bar is
+    /// full. (One you hid that sits between it and the shown icons keeps it
+    /// hidden too, and that one Show in Menu Bar can fix.)
+    func isWaitingForRoom(_ item: MenuBarItem) -> Bool {
+        guard item.section == .hidden, preferences.priority(for: item.key) == .shown else { return false }
+        return !items.contains {
+            $0.section == .hidden && $0.isMovable && $0.frame.minX > item.frame.minX
+                && preferences.priority(for: $0.key) == .hidden
+        }
+    }
+
+    /// How wide the screen with Perch's menu bar is, so its strips can fit it.
+    var barScreenWidth: CGFloat {
+        (menuBar.screen ?? NSScreen.main)?.visibleFrame.width ?? 1400
+    }
+
     /// Moves asked for in Arrange that no pass has picked up yet.
     var hasQueuedMoves: Bool { queued != nil }
 
@@ -244,6 +253,11 @@ final class LayoutEngine: ObservableObject {
             return item
         }
         guard publish else { return classified }
+        return self.publish(classified)
+    }
+
+    @discardableResult
+    private func publish(_ classified: [MenuBarItem]) -> [MenuBarItem] {
         items = classified
         perchMinX = menuBar.perchFrame()?.minX
         perchWidth = menuBar.perchFrame()?.width
@@ -257,11 +271,6 @@ final class LayoutEngine: ObservableObject {
     enum Placement: Equatable {
         /// Just left of another icon, the divider or Perch, ending up shown or hidden.
         case before(Anchor, shown: Bool)
-
-        var isShown: Bool {
-            if case .before(_, let shown) = self { return shown }
-            return true
-        }
     }
 
     enum Anchor: Equatable {
@@ -340,12 +349,14 @@ final class LayoutEngine: ObservableObject {
             if let plan = plan(order, in: current, members: members) {
                 if plan.writes.isEmpty {
                     // Only the divider and Perch's own items move: right away.
+                    let before = current
                     if let position = plan.perch {
                         menuBar.movePerch(to: position)
                         await menuBar.settle()
                         current = await scan()
                     }
-                    setPriorities(order, in: current, members: members)
+                    // Accessibility gone meanwhile: the new scan is empty, so go by the old one.
+                    setPriorities(order, in: permissions.hasAccessibility ? current : before, members: members)
                     done()
                 } else if holdsMoves {
                     log.notice("\(plan.writes.count, privacy: .public) icons move when Arrange closes")
@@ -353,6 +364,7 @@ final class LayoutEngine: ObservableObject {
                     // The divider waits too: it goes by the order you set.
                     return true
                 } else {
+                    waitsForClose = false
                     await commit(plan, order, members: members, in: current)
                     done()
                     current = await scan()
@@ -368,10 +380,19 @@ final class LayoutEngine: ObservableObject {
         // Usually once; twice if Perch's item had to move to the cut first.
         var moved = false
         for _ in 0..<3 {
+            let before = (menuBar.dividerFrame(), menuBar.perchFrame())
             guard placeDivider(in: current) else { break }
             moved = true
             await menuBar.settle()
             current = await settledScan()
+            // macOS put it right back: the spot Perch chose is on the wrong
+            // side of an icon whose position it had to guess. Trying again
+            // this pass would only make the same guess.
+            if let divider = before.0, let after = menuBar.dividerFrame(), abs(after.maxX - divider.maxX) < 1,
+               before.1?.minX == menuBar.perchFrame()?.minX {
+                log.notice("the divider landed where it was; trying again on the next change")
+                break
+            }
         }
         if !moved { await scan() }
         return true
@@ -386,10 +407,12 @@ final class LayoutEngine: ObservableObject {
         for _ in 0..<15 {
             try? await Task.sleep(for: .milliseconds(100))
             let next = await scan(publish: false)
-            if Self.layout(of: next) == Self.layout(of: previous) { break }
+            let agreed = Self.layout(of: next) == Self.layout(of: previous)
             previous = next
+            if agreed { break }
         }
-        return await scan()
+        // The scan that agreed, not a fresh one that might catch an icon mid-redraw.
+        return publish(previous)
     }
 
     private static func layout(of items: [MenuBarItem]) -> [String] {
@@ -449,9 +472,9 @@ final class LayoutEngine: ObservableObject {
         let right = rightEntry?.position
         switch (left, right) {
         case let (l?, r?) where leftEntry?.isGuess == true && rightEntry?.isGuess != true:
-            return r + min(0.05, (l - r) / 2)
+            return r + min(0.05, (l - r) / 16)
         case let (l?, r?) where rightEntry?.isGuess == true && leftEntry?.isGuess != true:
-            return l - min(0.05, (l - r) / 2)
+            return l - min(0.05, (l - r) / 16)
         case let (l?, r?): return r + min(1, (l - r) / 2)
         case let (nil, r?): return r + 1
         case let (l?, nil): return l - 1
@@ -664,9 +687,17 @@ final class LayoutEngine: ObservableObject {
             items.filter(\.isInMenuBar).count >= before - 1
                 && movedKeys.isSubset(of: Set(items.filter(\.isInMenuBar).map(\.key)))
         }
-        for _ in 0..<16 where !back(after) {
+        for _ in 0..<16 where !back(after) && permissions.hasAccessibility {
             try? await Task.sleep(for: .milliseconds(500))
             after = await settledScan()
+        }
+        // Without Accessibility the bar reads empty, which would look like
+        // every icon went missing and undo a move that worked. Leave it.
+        guard permissions.hasAccessibility else {
+            log.notice("Accessibility went away during a move; not checking it")
+            // The spots are applied; keep which side each icon is on, too.
+            setPriorities(order, in: items, members: members)
+            return
         }
         let previous = Dictionary(uniqueKeysWithValues: members.map { ($0, preferences.priority(for: $0)) })
         setPriorities(order, in: after, members: members)
@@ -792,10 +823,11 @@ final class LayoutEngine: ObservableObject {
         // Room between the notch (or the middle of the screen, where app menus
         // can reach on screens without one) and the clock and Control Center.
         let leftBound = screen.auxiliaryTopRightArea?.minX ?? screen.frame.midX
-        let rightBound = inBar.filter(\.isFixed).map(\.frame.minX).min() ?? screen.frame.maxX
+        let onScreen = { (item: MenuBarItem) in MenuBarGeometry.isInMenuBar(item.frame, of: screen) }
+        let rightBound = inBar.filter { $0.isFixed && onScreen($0) }.map(\.frame.minX).min() ?? screen.frame.maxX
         // Icons macOS places itself (the mic indicator) take room too.
         let reserved = inBar
-            .filter { !$0.isMovable && !$0.isFixed && $0.section == .shown }
+            .filter { !$0.isMovable && !$0.isFixed && $0.section == .shown && onScreen($0) }
             .reduce(0) { $0 + $1.frame.width + gap }
         var room = rightBound - leftBound - reserved - 8
         publishRoom(room, screen: screen, rightBound: rightBound, reserved: reserved, gap: gap)
@@ -880,10 +912,6 @@ final class LayoutEngine: ObservableObject {
 
     // MARK: - Triggers
 
-    private func retry(after delay: TimeInterval) {
-        scheduleArrange(after: delay)
-    }
-
     private func observeTriggers() {
         // The first hide waits for a real pass, so it hides only what doesn't fit.
         menuBar.placeFirst = { [weak self] in await self?.arrange() ?? true }
@@ -891,11 +919,6 @@ final class LayoutEngine: ObservableObject {
         // A Live Activity came or went, or an icon changed width. Wait for it
         // to finish animating; a pass that changes nothing moves nothing.
         menuBar.onBarChange = { [weak self] in self?.scheduleArrange(after: 1.5) }
-
-        preferences.$priorities
-            .dropFirst()
-            .sink { [weak self] _ in self?.scheduleArrange() }
-            .store(in: &cancellables)
 
         // Accessibility granted after launch: list the icons and arrange them.
         permissions.$hasAccessibility
@@ -913,37 +936,37 @@ final class LayoutEngine: ObservableObject {
             forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self else { return }
-                // This fires for small things too (the Dock, say).
-                let frames = NSScreen.screens.map(\.frame)
-                if frames != self.lastScreenFrames {
-                    self.lastScreenFrames = frames
-                    self.retry(after: 1.5)
-                } else {
-                    self.scheduleArrange(after: 1.5)
-                }
+                self?.scheduleArrange(after: 1.5)
             }
         })
 
         observers.append(DistributedNotificationCenter.default().addObserver(
             forName: NSNotification.Name("com.apple.screenIsUnlocked"), object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.retry(after: 1.5) }
+            MainActor.assumeIsolated { self?.scheduleArrange(after: 1.5) }
         })
 
         let workspace = NSWorkspace.shared.notificationCenter
         observers.append(workspace.addObserver(
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.retry(after: 3) }
+            MainActor.assumeIsolated { self?.scheduleArrange(after: 3) }
         })
-        // Icons come and go with their apps, which changes what fits.
-        for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
-            observers.append(workspace.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
-                MainActor.assumeIsolated {
-                    self?.scheduleArrange(after: 3)
-                }
-            })
+        // Icons come and go with their apps, which changes what fits. Most
+        // menu bar apps have no Dock icon, and those post no launch or quit
+        // notifications, so watch the list of running apps instead.
+        // Background-only helpers can't have icons; they're skipped.
+        appsObservation = NSWorkspace.shared.observe(\.runningApplications, options: [.old, .new]) { [weak self] _, change in
+            let changed = (change.newValue ?? []) + (change.oldValue ?? [])
+            // Control Center restarting is Perch's own doing; XPC services and
+            // extensions (web content, view services) come and go and have no icons.
+            guard changed.contains(where: {
+                $0.activationPolicy != .prohibited && $0.bundleIdentifier != "com.apple.controlcenter"
+                    && !["xpc", "appex"].contains($0.bundleURL?.pathExtension ?? "")
+            }) else { return }
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { self?.scheduleArrange(after: 3) }
+            }
         }
     }
 }

@@ -151,8 +151,9 @@ final class MenuBarController: NSObject, ObservableObject {
 
     // MARK: - Showing and hiding
 
-    /// Shows every icon in the bar. Perch does this only at launch, to picture
-    /// icons for its bar, and as a last resort for an icon it can't open otherwise.
+    /// Shows every icon in the bar: at launch, to picture icons for Perch's
+    /// bar; when Accessibility is turned off or exact pictures are turned on;
+    /// and as a last resort for an icon it can't open otherwise.
     func reveal() {
         stopMenuWatch()
         isTemporaryReveal = false
@@ -186,6 +187,7 @@ final class MenuBarController: NSObject, ObservableObject {
             }
             return
         }
+        hasReset = false
         visibility = .collapsed
         apply()
     }
@@ -196,9 +198,7 @@ final class MenuBarController: NSObject, ObservableObject {
 
     /// Opens a hidden icon picked from the drawer or Spotlight: shows the hidden icons just
     /// long enough for its menu, then hides them again when the menu closes.
-    /// Returns false when Perch is busy arranging and can't open it now.
-    @discardableResult
-    func openTemporarily(_ item: MenuBarItem) -> Bool {
+    func openTemporarily(_ item: MenuBarItem) {
         // A newer open replaces an older one that hasn't finished.
         stopMenuWatch()
         if !visibility.isRevealed {
@@ -223,7 +223,6 @@ final class MenuBarController: NSObject, ObservableObject {
             ItemOpener.open(item, if: isCurrent)
             if self.isTemporaryReveal { self.collapseWhenMenuCloses() }
         }
-        return true
     }
 
     /// The latest `openTemporarily` request; older ones that are still waiting give up.
@@ -311,6 +310,7 @@ final class MenuBarController: NSObject, ObservableObject {
             defaults.removeObject(forKey: "NSStatusItem VisibleCC \(name)")
         }
         Autosave.resetNames()
+        hasPlaced = false
         visibility = .revealed
         seedPositionsIfNeeded()
         createItems()
@@ -333,7 +333,7 @@ final class MenuBarController: NSObject, ObservableObject {
             button.action = #selector(perchClicked(_:))
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
             button.setAccessibilityLabel("Perch")
-            button.toolTip = "Click to show or hide icons. Right-click to arrange."
+            button.toolTip = "Click for hidden icons. Right-click to arrange."
         }
     }
 
@@ -345,7 +345,6 @@ final class MenuBarController: NSObject, ObservableObject {
             button.action = #selector(dividerClicked(_:))
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
             button.setAccessibilityLabel("Perch divider")
-            button.toolTip = "Click to hide icons. Right-click to arrange."
         }
         watchDivider()
     }
@@ -444,9 +443,12 @@ final class MenuBarController: NSObject, ObservableObject {
         if visibility.isRevealed {
             hiddenDivider.length = Self.dividerLength
             hiddenDivider.button?.image = Self.dividerImage
+            hiddenDivider.button?.toolTip = "Click to hide icons. Right-click to arrange."
         } else {
             hiddenDivider.button?.image = nil
             hiddenDivider.length = Self.collapsedLength
+            // Collapsed, it spans the empty part of the menu bar; no tooltip there.
+            hiddenDivider.button?.toolTip = nil
         }
         updatePerchIcon()
     }
@@ -535,15 +537,35 @@ final class MenuBarController: NSObject, ObservableObject {
         DispatchQueue.main.async { [weak self] in self?.waitForPlacement() }
     }
 
-    /// Waits until the divider has its new frame after a move: a new status
-    /// item's frame is empty or stale for a moment.
+    /// Waits until the divider has its new frame after a move. A new status
+    /// item first sits off the menu bar for about half a second, then is laid
+    /// out for a while as if the old one were still there, so a frame counts
+    /// only once it's in a menu bar and has held still for 0.6 s (2.5 s at most).
     func settle() async {
-        var last: NSRect?
-        for _ in 0..<20 {
+        var last: [NSRect?] = []
+        var steady = 0
+        for _ in 0..<50 {
             try? await Task.sleep(for: .milliseconds(50))
-            let now = screenFrame(of: hiddenDivider)
-            if let now, now == last { return }
+            // Perch's own item too, when it's showing: it may be the one that moved.
+            let now = [screenFrame(of: hiddenDivider)] + (perchItem.isVisible ? [screenFrame(of: perchItem)] : [])
+            if now == last, now.allSatisfy({ $0.map(Self.isOnMenuBar) ?? false }) {
+                steady += 1
+                if steady >= 12 { return }
+            } else {
+                steady = 0
+            }
             last = now
+        }
+    }
+
+    /// Whether a frame (top-left origin) sits along the top of a screen, or
+    /// just above it when the menu bar hides itself. (Before it's placed, a
+    /// new item sits at the bottom of the screen.)
+    private static func isOnMenuBar(_ frame: CGRect) -> Bool {
+        let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
+        return NSScreen.screens.contains {
+            let top = primaryHeight - $0.frame.maxY
+            return frame.minY > top - 60 && frame.minY < top + 2
         }
     }
 
@@ -579,7 +601,12 @@ final class MenuBarController: NSObject, ObservableObject {
         defer { isFirstHiding = false }
         while await placeFirst?() == false {
             guard hasAccessibility else { return }
-            try? await Task.sleep(for: .seconds(1))
+            if AppRestarter.screenIsLocked {
+                // Nothing to look at until it's unlocked; don't check every second all night.
+                await AppRestarter.waitForUnlock()
+            } else {
+                try? await Task.sleep(for: .seconds(1))
+            }
         }
         guard hasAccessibility else { return }
         hasPlaced = true

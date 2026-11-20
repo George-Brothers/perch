@@ -2,6 +2,15 @@ import AppKit
 
 /// Cheap, on-demand questions about the menu bar. Nothing here runs on a timer.
 enum MenuBarGeometry {
+    /// Whether an icon's frame (top-down from the main screen, as Accessibility
+    /// gives it) is in this screen's menu bar, including one auto-hidden above
+    /// it. Checks both directions, so a display stacked above or below doesn't count.
+    static func isInMenuBar(_ frame: CGRect, of screen: NSScreen) -> Bool {
+        let top = (NSScreen.screens.first?.frame.height ?? 0) - screen.frame.maxY
+        return screen.frame.minX <= frame.minX && frame.minX < screen.frame.maxX
+            && frame.minY > top - 60 && frame.minY < top + menuBarHeight(for: screen) + 4
+    }
+
     static func menuBarHeight(for screen: NSScreen) -> CGFloat {
         max(
             NSStatusBar.system.thickness,
@@ -21,10 +30,13 @@ enum MenuBarGeometry {
     /// Whether a point (screen coordinates, bottom-left origin) is empty menu
     /// bar space: in the bar, but not on an app menu or any icon. Asks
     /// Accessibility what's under the point; without it, the answer is no.
-    /// Only the front app's own bar counts, so the small gaps between icons don't.
+    /// Only the bar of the app that owns the menu bar counts, so the small gaps between icons don't.
     @MainActor static func isEmptyMenuBarSpace(_ point: NSPoint) -> Bool {
         guard isInMenuBar(point), AXIsProcessTrusted(),
-              let front = NSWorkspace.shared.frontmostApplication?.processIdentifier else { return false }
+              // Not the front app: while Perch's own window is in front, the
+              // menu bar still belongs to the app before it.
+              let front = (NSWorkspace.shared.menuBarOwningApplication
+                  ?? NSWorkspace.shared.frontmostApplication)?.processIdentifier else { return false }
         let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
         var element: AXUIElement?
         // Runs on every click; a busy app must not hold it up.

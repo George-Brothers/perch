@@ -5,7 +5,7 @@ Perch is a light menu bar manager for macOS. The goal: the menu bar macOS should
 ## The rules
 
 1. **Do nothing until something changes.** No timers, no background screenshots. Perch reacts to what macOS already announces: an app opening or quitting, a display change, wake, unlock, a click.
-2. **Improve the menu bar, never take from it.** Perch's own footprint is one small icon and a hairline divider.
+2. **Improve the menu bar, never take from it.** By default Perch adds nothing you can see to the menu bar; a thin line or a small icon are options.
 3. **No surprise permissions.** Accessibility is required. Screen Recording is opt-in, behind a switch, with an explanation first.
 4. **Never touch the mouse.** Perch moves icons by saving their positions, never with synthetic clicks or drags, and waits while a menu is open.
 
@@ -22,7 +22,7 @@ Perch is a light menu bar manager for macOS. The goal: the menu bar macOS should
 
 | Feature | How it works |
 |---|---|
-| Perch's bar | Click empty menu bar space (or Perch's line or icon). Every icon that's hidden or doesn't fit, in a dark pill under the menu bar (Arrange uses the same dark glass, so both stand out over any window; icon pictures taken on a light menu bar are turned light). Clicking one opens its menu there: Perch copies the off-screen menu through Accessibility (panels are moved instead). The bar stays open with that icon highlighted, like the menu bar, and closes once you pick something. A divider stretched 10,000 pt keeps those icons off screen. |
+| Perch's bar | Click empty menu bar space (or Perch's line or icon). Every icon that's hidden or doesn't fit, in a dark pill under the menu bar (Arrange uses the same dark glass, so both stand out over any window; icon pictures taken on a light menu bar are turned light). Clicking one opens its menu there: Perch copies the off-screen menu through Accessibility (panels are moved instead). The bar stays open with that icon highlighted, like the menu bar, and closes once you pick something. Right-click an icon you hid for Show in Menu Bar (if that needs the bar to reset, it resets right away: there's no Arrange to wait for); an icon there only for lack of room says so. A divider stretched thousands of points wide keeps those icons off screen. |
 | In the menu bar | Nothing (default), a line, or an icon. With nothing, Accessibility tells Perch a click landed on the front app's empty bar, not an icon. Without Accessibility the icon stays. |
 | Order | Each icon is in the bar or Hidden, and the bar's order is its priority: when it runs out of room, the leftmost icons wait in Hidden. Perch moves its own divider to match (instant) on launch, a change in Arrange, display change, wake, unlock, app launch or quit, and whenever an icon right of the divider appears, goes or changes width (a Live Activity, say: macOS adds those without any app launching). That last one costs nothing: AppKit reports when the divider's right edge moves, and Perch ignores the moves it makes itself. |
 | Live Activities | macOS puts them (and the mic and camera dot) at the left end of the shown icons itself; they have no saved position, so Perch can't hide or reorder them. Perch leaves room for them, hiding the leftmost icon if needed, and Arrange shows them pinned at the left of the bar side, not draggable, with a note saying so. |

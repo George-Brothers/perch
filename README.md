@@ -30,6 +30,12 @@ Perch uses about 15 MB of memory and no CPU while idle. It reacts to events and 
 
 On first launch, a short setup walks you through Accessibility and a few choices. Everything else is in the Guide (Settings → Guide), where you can jump to any topic.
 
+<img src="docs/screenshots/perch-bar.png" width="720" alt="Perch's bar: hidden icons in a small dark bar under the menu bar, on a light and a dark page">
+
+<img src="docs/screenshots/arrange-over.png" width="720" alt="Arrange over the menu bar">
+
+<img src="docs/screenshots/setup.png" width="360" alt="Setup's welcome step"> <img src="docs/screenshots/guide.png" width="430" alt="The Guide's About Perch topic">
+
 ## Build
 
 Requires macOS 26 and Xcode 26. There's no download yet: build it from source.

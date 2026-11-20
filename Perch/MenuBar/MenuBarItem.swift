@@ -38,7 +38,7 @@ struct MenuBarItem: Identifiable {
         identifier == "com.apple.menuextra.clock" || identifier == "com.apple.menuextra.controlcenter"
     }
 
-    /// Whether Perch can ⌘-drag this icon. The mic/camera indicator, Live
+    /// Whether Perch can move this icon. The mic/camera indicator, Live
     /// Activities, the clock and Control Center are placed by macOS and won't move.
     var isMovable: Bool {
         !isFixed && !isLiveActivity && identifier != "com.apple.menuextra.audiovideo"

@@ -6,9 +6,8 @@ import ApplicationServices
 /// On macOS 26 every menu bar icon's window belongs to Control Center, so the
 /// window list can't say which app owns which icon. Accessibility can: each
 /// app exposes its icons as children of its "extras menu bar".
-/// Runs only when asked (when the Perch panel opens), never on a timer.
+/// Runs only when asked (a pass, or Arrange or Perch's bar opening), never on a timer.
 enum MenuBarScanner {
-    /// Items that are always visible and can't be moved, so listing them is noise.
     private struct AppInfo {
         let pid: pid_t
         let bundleID: String?
@@ -55,9 +54,12 @@ enum MenuBarScanner {
             let label = AX.string(child, kAXDescriptionAttribute) ?? AX.string(child, kAXTitleAttribute)
             let mid = CGPoint(x: frame.midX, y: frame.midY)
             let inBar = barWindows.contains { $0.insetBy(dx: -2, dy: -2).contains(mid) }
+            // Two items can share an identifier (two Live Activities from one app).
+            var id = "\(app.bundleID ?? String(app.pid))#\(identifier ?? String(index))"
+            if result.contains(where: { $0.id == id }) { id += "#\(index)" }
 
             result.append(MenuBarItem(
-                id: "\(app.bundleID ?? String(app.pid))#\(identifier ?? String(index))",
+                id: id,
                 element: child,
                 pid: app.pid,
                 bundleID: app.bundleID,
@@ -80,9 +82,13 @@ enum MenuBarScanner {
         let statusLevel = Int(CGWindowLevelForKey(.statusWindow))
         return windows.compactMap { window in
             guard window[kCGWindowLayer as String] as? Int == statusLevel,
-                  let dict = window[kCGWindowBounds as String] as? NSDictionary
+                  let dict = window[kCGWindowBounds as String] as? NSDictionary,
+                  let rect = CGRect(dictionaryRepresentation: dict),
+                  // Perch's collapsed divider spans thousands of points; an icon
+                  // that's turned off could seem to be inside it.
+                  rect.width < 2000
             else { return nil }
-            return CGRect(dictionaryRepresentation: dict)
+            return rect
         }
     }
 }

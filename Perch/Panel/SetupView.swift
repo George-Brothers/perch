@@ -16,7 +16,17 @@ struct SetupView: View {
         case welcome, access, choices, ready
     }
 
-    @State private var step: Step = .welcome
+    @State private var step: Step
+
+    /// Setup that comes back after you allow Accessibility picks up there.
+    init(permissions: Permissions, preferences: Preferences, startAt: Step = .welcome,
+         onOpenGuide: @escaping () -> Void, onDone: @escaping () -> Void) {
+        self.permissions = permissions
+        self.preferences = preferences
+        self.onOpenGuide = onOpenGuide
+        self.onDone = onDone
+        _step = State(initialValue: startAt)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -127,6 +137,13 @@ struct SetupView: View {
             .multilineTextAlignment(.leading)
             .padding(.top, 4)
             para(barItemNote)
+                .padding(.top, 4)
+
+        case .ready where !permissions.hasAccessibility:
+            title("One step left")
+            para("Perch can't see your menu bar icons until you allow Accessibility. Until then, it doesn't hide anything.")
+            Button("Allow Accessibility…") { permissions.requestAccessibility() }
+                .buttonStyle(.borderedProminent)
                 .padding(.top, 4)
 
         case .ready:
