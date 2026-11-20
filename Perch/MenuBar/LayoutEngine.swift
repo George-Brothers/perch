@@ -47,8 +47,15 @@ final class LayoutEngine: ObservableObject {
     /// The order you set in Arrange, until the bar matches it: what shows,
     /// left to right. Movable icons not in it go to the hidden side.
     private var queued: [Spot]? {
-        didSet { if queued != oldValue { queuedBar = queued } }
+        didSet {
+            if queued == nil { respacing = false }
+            let bar = respacing ? nil : queued
+            if bar != queuedBar { queuedBar = bar }
+        }
     }
+    /// The queued batch only saves the bar's spots again, spread out (see
+    /// `respace`): it doesn't change what's hidden, and Arrange draws the bar as it is.
+    private var respacing = false
     /// What's waiting, for Arrange to draw instead of the bar as it is.
     @Published private(set) var queuedBar: [Spot]?
 
@@ -92,8 +99,9 @@ final class LayoutEngine: ObservableObject {
             return false
         }
         // The order and the icons it covers change together, and only if the drop is accepted.
-        var members = queued == nil ? Set(items.filter { $0.isInMenuBar && $0.isMovable }.map(\.key)) : queuedFrom
-        var order = queued.map { withNewcomers($0, into: &members) } ?? shownOrder(in: items)
+        let fresh = queued == nil || respacing
+        var members = fresh ? Set(items.filter { $0.isInMenuBar && $0.isMovable }.map(\.key)) : queuedFrom
+        var order = fresh ? shownOrder(in: items) : withNewcomers(queued ?? [], into: &members)
         members.insert(item.key)
         order.removeAll { $0 == .icon(item.key) }
         if shown { order.insert(.icon(item.key), at: insertionIndex(for: anchor, in: order)) }
@@ -104,6 +112,7 @@ final class LayoutEngine: ObservableObject {
         }
         if !shown { setHiddenOrder(item.key, before: anchor, shown: order) }
         notice = nil
+        respacing = false
         queuedFrom = members
         queuedRevision += 1
         queued = order
@@ -121,8 +130,9 @@ final class LayoutEngine: ObservableObject {
             notice = "Perch is restarting to apply the new spacing. Try again in a moment."
             return false
         }
-        var members = queued == nil ? Set(items.filter { $0.isInMenuBar && $0.isMovable }.map(\.key)) : queuedFrom
-        var order = queued.map { withNewcomers($0, into: &members) } ?? shownOrder(in: items)
+        let fresh = queued == nil || respacing
+        var members = fresh ? Set(items.filter { $0.isInMenuBar && $0.isMovable }.map(\.key)) : queuedFrom
+        var order = fresh ? shownOrder(in: items) : withNewcomers(queued ?? [], into: &members)
         order.removeAll { $0 == .perch }
         order.insert(.perch, at: insertionIndex(for: anchor, in: order))
         guard plan(order, in: items, members: members) != nil else {
@@ -130,6 +140,7 @@ final class LayoutEngine: ObservableObject {
             return false
         }
         notice = nil
+        respacing = false
         queuedFrom = members
         queuedRevision += 1
         queued = order
@@ -532,26 +543,58 @@ final class LayoutEngine: ObservableObject {
         var perch: Double?
     }
 
-    /// How far apart saved spots must be. macOS keeps them to about seven
-    /// significant digits, so ones closer than that become the same spot,
-    /// and nothing (not even the divider) fits between them.
+    /// How far apart saved spots must be. macOS keeps them as 32-bit floats
+    /// (290.00116 and 290.00113 are neighbors), so a few steps of that leaves
+    /// room for the divider between two. Far below the gaps Perch makes itself.
     private static func minimumGap(near value: Double) -> Double {
-        max(0.01, abs(value) * 1e-5)
+        4 * Double(Float(abs(value)).ulp)
     }
 
-    private var lastRespace: Date?
+    /// When each pair of icons was last spread out, so one that spreading
+    /// didn't help doesn't restart Control Center over and over.
+    private var respaced: [String: Date] = [:]
 
-    /// Two icons on either side of where the divider has to go are saved too
-    /// close together for it to fit between them: save the bar's order again,
-    /// spread out. That's one Control Center restart (after Arrange closes).
-    private func respace(in items: [MenuBarItem]) {
-        // If spreading them didn't help, don't restart Control Center over and over.
-        guard queued == nil, Date().timeIntervalSince(lastRespace ?? .distantPast) > 600 else { return }
-        var members = Set(items.filter { $0.isInMenuBar && $0.isMovable }.map(\.key))
-        let order = withNewcomers(shownOrder(in: items), into: &members)
-        guard let plan = plan(order, in: items, members: members), !plan.writes.isEmpty else { return }
+    /// The icons on either side of where the divider has to go are saved too
+    /// close together for it to fit between them: save the bar's spots again,
+    /// spread out, in the order it has now. That's one Control Center restart
+    /// (after Arrange closes). What's hidden doesn't change.
+    private func respace(between left: Entry, and right: Entry, in items: [MenuBarItem]) {
+        let pair = "\(left.kind) \(right.kind)"
+        guard queued == nil, !MenuBarSpacing.isApplying else { return }
+        if let last = respaced[pair], Date().timeIntervalSince(last) < 600 {
+            log.notice("saved spots are too close for the divider, and spreading them didn't help")
+            return
+        }
+        let members = Set(items.filter { $0.isInMenuBar && $0.isMovable }.map(\.key))
+        // Every icon Perch can place, left to right as they are now.
+        let order: [Spot] = entries(for: items).compactMap { entry in
+            switch entry.kind {
+            case .perch: return .perch
+            case .fixed: return nil
+            case .icon(let key):
+                guard let item = items.first(where: { $0.key == key }), item.isMovable, !staysPut(item) else { return nil }
+                return .icon(key)
+            }
+        }
+        guard let plan = plan(order, in: items, members: members), !plan.writes.isEmpty else {
+            log.notice("saved spots are too close for the divider, and Perch can't spread them")
+            return
+        }
+        // Only worth a restart if the two end up far enough apart.
+        func spot(_ entry: Entry) -> Double? {
+            switch entry.kind {
+            case .icon(let key): return plan.writes.first { $0.key == key }?.value ?? entry.position
+            case .perch: return plan.perch ?? entry.position
+            case .fixed: return entry.position
+            }
+        }
+        guard let l = spot(left), let r = spot(right), l - r >= Self.minimumGap(near: l) else {
+            log.notice("saved spots are too close for the divider, and spreading wouldn't help")
+            return
+        }
         log.notice("saved spots are too close for the divider; spreading \(plan.writes.count, privacy: .public) out")
-        lastRespace = Date()
+        respaced[pair] = Date()
+        respacing = true
         queuedFrom = members
         queuedRevision += 1
         queued = order
@@ -780,6 +823,7 @@ final class LayoutEngine: ObservableObject {
 
     /// Marks what's in `order` shown and the other icons that were part of it hidden.
     private func setPriorities(_ order: [Spot], in items: [MenuBarItem], members: Set<String>? = nil) {
+        guard !respacing else { return }
         let members = members ?? queuedFrom
         for item in items where item.isInMenuBar && item.isMovable && members.contains(item.key) {
             if staysPut(item) && !order.contains(.icon(item.key)) { continue }
@@ -925,7 +969,7 @@ final class LayoutEngine: ObservableObject {
         }
         if let left = leftOfCut, let right = rightOfCut, !left.isGuess, !right.isGuess,
            let l = left.position, let r = right.position, l - r < Self.minimumGap(near: l) {
-            respace(in: items)
+            respace(between: left, and: right, in: items)
             return false
         }
         guard let position = Self.between(leftOfCut, rightOfCut) else { return false }
