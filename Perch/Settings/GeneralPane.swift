@@ -41,25 +41,6 @@ struct GeneralPane: View {
             }
 
             Section {
-                Toggle("Hide icons again automatically", isOn: $preferences.autoRehideEnabled)
-                if preferences.autoRehideEnabled {
-                    LabeledContent("After") {
-                        HStack {
-                            Slider(value: $preferences.rehideDelay, in: 5...60)
-                                .frame(minWidth: 140)
-                            Text("\(Int(preferences.rehideDelay.rounded())) s")
-                                .monospacedDigit()
-                                .frame(width: 36, alignment: .trailing)
-                        }
-                    }
-                    Toggle("Also when I click outside the menu bar", isOn: $preferences.rehideOnClickOutside)
-                }
-            } footer: {
-                Text("Perch waits while a menu is open.")
-                    .foregroundStyle(.secondary)
-            }
-
-            Section {
                 LabeledContent("Accessibility") {
                     if permissions.hasAccessibility {
                         Label("Allowed", systemImage: "checkmark.circle.fill").foregroundStyle(.green)

@@ -52,7 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 maxWidth: min((menuBar.screen?.visibleFrame.width ?? 900) - 60, 900),
                 onOpenItem: { item in
                     self?.arrangePanel.close()
-                    if self?.open(item) == false { NSSound.beep() }
+                    Task { if await self?.open(item) == false { NSSound.beep() } }
                 },
                 onOpenSettings: {
                     self?.arrangePanel.close()
@@ -114,7 +114,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard permissions.hasScreenRecording, !engine.isArranging,
                       !menuBar.visibility.isRevealed else { return }
                 Task {
-                    menuBar.reveal(armAutoHide: false)
+                    menuBar.reveal()
                     try? await Task.sleep(for: .milliseconds(400))
                     await captureVisible()
                     // The reveal also starts the usual capture; let it finish first.
@@ -126,14 +126,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let drawer = DrawerController(engine: engine, images: images, preferences: preferences)
         self.drawer = drawer
-        drawer.onOpenItem = { item in
-            if !menuBar.openTemporarily(item) { NSSound.beep() }
+        drawer.onOpenItem = { [weak self] item, point in
+            Task { await self?.open(item, at: point) }
         }
         drawer.onOpenArrange = { [weak self] in self?.arrangePanel.open(anchor: menuBar.anchor) }
         menuBar.toggleDrawer = { [weak self] in
-            guard preferences.drawerEnabled, permissions.hasScreenRecording, permissions.hasAccessibility else {
-                return false
-            }
+            guard permissions.hasAccessibility else { return false }
             self?.closePanels(except: .drawer)
             self?.drawer.toggle(anchor: menuBar.anchor)
             return true
@@ -171,11 +169,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Actions for Spotlight and Shortcuts
 
-    /// Opens the drawer, or shows hidden icons in the bar. Never hides them.
+    /// Opens Perch's bar. Never closes it.
     func showHiddenIcons() {
         if drawer.isOpen { return }
-        if menuBar.toggleDrawer?() == true { return }
-        menuBar.reveal()
+        if menuBar.toggleDrawer?() != true { showArrange() }
     }
 
     /// Opens Arrange (from Spotlight); running it again leaves it open.
@@ -193,21 +190,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func openIcon(key: String) async -> OpenResult {
         guard Permissions.shared.hasAccessibility else { return .noPermission }
         guard let item = await icons().first(where: { $0.key == key }) else { return .gone }
-        return open(item) ? .opened : .busy
+        return await open(item) ? .opened : .busy
     }
 
     enum OpenResult { case opened, gone, busy, noPermission }
 
-    /// Opens an icon's menu. A hidden icon comes out just until its menu closes.
-    /// False when Perch is busy arranging.
+    /// Opens an icon's menu. A hidden icon opens right where you are (under
+    /// Perch's bar, or under the menu bar), without coming into the menu bar.
+    /// Only if that fails does it come out just until its menu closes.
     @discardableResult
-    private func open(_ item: MenuBarItem) -> Bool {
-        if item.section == .hidden {
-            return menuBar.openTemporarily(item)
+    private func open(_ item: MenuBarItem, at point: NSPoint? = nil) async -> Bool {
+        guard item.section == .hidden else {
+            ItemOpener.open(item)
+            return true
         }
-        let menuBar = self.menuBar!
-        ItemOpener.open(item)
-        return true
+        if await MenuMirror.open(item, at: point ?? defaultMenuPoint()) { return true }
+        return menuBar.openTemporarily(item)
+    }
+
+    /// Just under the menu bar, where hidden icons start.
+    private func defaultMenuPoint() -> NSPoint {
+        guard let anchor = menuBar.anchor() else {
+            let screen = NSScreen.main?.frame ?? .zero
+            return NSPoint(x: screen.midX, y: screen.maxY - 30)
+        }
+        return NSPoint(x: anchor.minX - 8, y: anchor.minY - 4)
     }
 
     /// Picking a menu bar icon in Spotlight opens its menu.
