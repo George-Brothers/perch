@@ -48,6 +48,10 @@
 42. `perch-live-activities`: Perch re-fits the bar when an icon right of the divider appears, goes or changes width (`MenuBarController.onBarChange`, from `NSWindow.didMoveNotification` on the divider's window, right edge only, ignored for 2 s after Perch moves its own items). Arrange shows Live Activities and the mic and camera dot pinned at the left of the bar side (not draggable, a tooltip explains).
 43. `perch-setup`: first launch plays setup (`SetupView`, its own window): Welcome with an intro animation, Accessibility, choices, Ready. The Guide's first topic is About Perch (version, GitHub) instead of Welcome; its footer is plain Next. Both windows use `HostedWindow`. Setup still counts as done under the old `welcomeShown` key.
 44. `perch-council-fixes`: final council review before merging to main. The divider moves once per change (`settle()` waits for a menu-bar frame that holds 0.6 s; a pass stops if the divider lands where it was). Perch's bar offers Show in Menu Bar only for icons you hid; empty-space clicks work while Perch's own window is in front (`menuBarOwningApplication`); notices clear when Arrange closes; restarts wait for unlock on a notification instead of checking; setup resumes at Accessibility; dead code and old screenshots removed.
+45. `perch-stacked-settle`: `settle()` ignores a new status item's first spot (x = 0 just below the main screen, where a display stacked below has its menu bar) and needs the item's right edge on the matching screen.
+46. `perch-unplaced-icons`: an icon with no saved spot at all (Now Playing) that appears among the hidden ones stays out of the shown order (`shownOrder`), so it no longer makes every plan fail.
+47. `perch-position-spacing`: plans keep saved spots at least `minimumGap` apart (0.01, or 1e-5 of the value), moving an icon that would stay when needed. If the divider has to go between two spots already too close, `respace` saves the bar's order again, spread out (one Control Center restart, at most every 10 minutes).
+48. `perch-guess-learning`: when the divider or Perch's item lands on the wrong side of an icon whose spot Perch had to guess, `learnedBounds` records which side the real spot is on; later guesses stay inside those bounds, and the pass tries again at once.
 
 ## macOS 26 facts
 - Reading or writing another app's sandbox container (~/Library/Containers/<id>) triggers the "access data from other apps" prompt (kTCCServiceSystemPolicyAppData) and the call blocks until it's answered. Perch tells sandboxed apps by their code signature, never by touching the container.
@@ -64,8 +68,11 @@
 - Each display draws its own copy of the status item windows.
 - AX hit test (`AXUIElementCopyElementAtPosition`) on empty menu bar space returns role AXMenuBar owned by the front app; app menus and icons return AXMenuBarItem. That's how Perch spots an empty-space click.
 - A collapsed divider is clamped to about 5,000 pt wide; its right edge is still where hidden icons end.
+- Saved positions are kept to about seven significant digits (290.00116 and 290.00113 are neighbors): nothing fits between two spots one step apart.
+- A new status item sits at x = 0 just below the main screen for a moment, then off screen to the left, then at its spot.
+- macOS's Now Playing icon has no saved spot and can appear left of the divider, among hidden icons (unlike Live Activities).
 - Nothing can be moved or captured while the screen is locked; Perch skips passes then.
-- Live Activities (`com.apple.controlcenter#<app>.liveActivity`) have no saved position. macOS always puts them just right of the divider, at the left end of the shown icons, so they can't be hidden or reordered. The only switch in System Settings is Notifications → "Allow Live Activities from iPhone", which covers iPhone ones, not a Mac app's.
+- Live Activities (`com.apple.controlcenter#<app>.liveActivity`) have no saved position. macOS always puts them just right of the divider, at the left end of the shown icons, so they can't be hidden or reordered. Checked again 2026-11-20 with T3's: moving the divider one icon left or right moves the Live Activity with it. The only switch in System Settings is Notifications → "Allow Live Activities from iPhone", which covers iPhone ones, not a Mac app's.
 
 ## Testing
 Testing happens on a MacBook Pro with a notch, sometimes with an external display as the main one. Perch never sends synthetic clicks; test drags go through a temporary in-app hook that feeds mouse events to Perch's own Arrange window (never committed).
