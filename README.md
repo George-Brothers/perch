@@ -42,7 +42,7 @@ Perch isn't notarized yet. The first time you open a downloaded copy, right-clic
 
 macOS has no API for hiding another app's menu bar icon. Perch adds a divider item and, when hiding, stretches it thousands of points wide. Everything to its left is pushed off the screen. Shrinking the divider brings them back.
 
-To move an icon across the divider, Perch does what you would: a quick ⌘-drag, with the pointer hidden and put back. Accessibility tells it where each icon is. The drawer draws icons from pictures taken only while it's open.
+Perch never touches your mouse. macOS keeps a saved position for every menu bar icon. To fit your screen, Perch moves only its own divider, which is instant. To move another app's icon, it saves the icon's new position and quietly restarts that app, holding the spot open so nothing jumps. Apps with windows open aren't restarted; their icon moves the next time they open. Accessibility tells Perch where each icon is. The drawer draws icons from pictures taken only while it's open.
 
 ## License
 

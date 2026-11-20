@@ -7,7 +7,7 @@ Perch is a light menu bar manager for macOS. The goal: the menu bar macOS should
 1. **Do nothing until something changes.** No timers, no background screenshots. Perch reacts to what macOS already announces: an app opening or quitting, a display change, wake, unlock, a click.
 2. **Improve the menu bar, never take from it.** Perch's own footprint is one small icon and a hairline divider.
 3. **No surprise permissions.** Accessibility is required. Screen Recording is opt-in, behind a switch, with an explanation first.
-4. **Never fight the user.** Perch waits while you use the mouse or a menu, and gives up on an icon it can't move instead of retrying it.
+4. **Never touch the mouse.** Perch moves icons by saving their positions, never with synthetic clicks or drags, and waits while a menu is open.
 
 **Performance budget (each PR is checked against it):**
 
@@ -24,8 +24,8 @@ Perch is a light menu bar manager for macOS. The goal: the menu bar macOS should
 |---|---|
 | Show and hide | Click empty menu bar space (or Perch's line or icon). A divider stretched 10,000 pt pushes hidden icons off screen. |
 | In the menu bar | Nothing (default), a line, or an icon. With nothing, Accessibility tells Perch a click landed on the front app's empty bar, not an icon. Without Accessibility the icon stays. |
-| Order | Each icon is in the bar or Hidden, and the bar's order is its priority: when it runs out of room, the leftmost icons wait in Hidden. Perch ⌘-drags icons to match on launch, a change in Arrange, display change, wake, unlock, and app launch or quit. |
-| Arrange | Right-click empty menu bar space. Rows that mirror the bar: Menu bar (in order, Perch's own item included), Hidden, Turned off. Drag an icon to any spot and Perch ⌘-drags the real one there. Turned-off icons open System Settings → Menu Bar. |
+| Order | Each icon is in the bar or Hidden, and the bar's order is its priority: when it runs out of room, the leftmost icons wait in Hidden. Perch moves its own divider to match (instant) on launch, a change in Arrange, display change, wake, unlock, and app launch or quit. |
+| Arrange | Right-click empty menu bar space. Rows that mirror the bar: Menu bar (in order, Perch's own item included), Hidden, Turned off. Drag an icon to any spot: Perch saves that position and restarts the icon's app (menu-bar-only apps right away, with the spot held open; apps with windows when they next open). Turned-off icons open System Settings → Menu Bar. |
 | Drawer (opt-in) | Hidden icons in a small bar under the menu bar. Needs Screen Recording; turned on in Settings → Features after an explanation. |
 | Spotlight | Every icon is a Core Spotlight item, re-indexed only when the set of icons changes. Picking one opens its menu, even when hidden. |
 | Shortcuts | App Intents: Show Hidden Icons, Open Menu Bar Icon (any icon, by name). |

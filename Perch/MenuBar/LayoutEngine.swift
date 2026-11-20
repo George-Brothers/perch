@@ -2,8 +2,12 @@ import AppKit
 import Combine
 import os
 
-/// Keeps the menu bar arranged by your priorities: every "Always" icon and as
-/// many "Auto" icons as fit stay right of the divider; the rest go left of it.
+/// Keeps the menu bar arranged: as many icons as fit stay right of the divider,
+/// in your order, and the rest go left of it (into Perch's bar).
+///
+/// It never touches the mouse. What fits is settled by moving Perch's own
+/// divider. An icon you move in Arrange gets a new saved position, and its app
+/// restarts to pick it up (see `StatusItemPositions`).
 ///
 /// It reacts to events only (launch, a priority change, a display change, wake,
 /// an app opening or quitting) and moves nothing when the bar is already right.
@@ -23,13 +27,6 @@ final class LayoutEngine: ObservableObject {
     private var arrangeAgain = false
     /// How many times in a row a pass waited for a menu or the mouse.
     private var deferrals = 0
-    /// Icons that didn't move when asked, with where they were. Skipped until
-    /// they move or you change a priority, so a stuck icon doesn't make the
-    /// bar flash on every trigger.
-    private var stuck: [String: CGFloat] = [:]
-    /// Bumped on a priority change, display change, wake or unlock, so a pass
-    /// that started before one of those doesn't mark icons stuck.
-    private var stuckGeneration = 0
     /// The display layout at the last display-change trigger.
     private var lastScreenFrames: [CGRect] = NSScreen.screens.map(\.frame)
 
@@ -55,7 +52,6 @@ final class LayoutEngine: ObservableObject {
     /// Moves an icon to an exact spot (from Arrange) and gives it `priority`.
     func place(_ item: MenuBarItem, _ placement: Placement, priority: IconPriority) {
         placements[item.key] = placement
-        stuck[item.key] = nil
         if preferences.priority(for: item.key) != priority {
             preferences.setPriority(priority, for: item.key) // schedules a pass
         } else {
@@ -78,9 +74,6 @@ final class LayoutEngine: ObservableObject {
     func refresh() {
         Task { await scan() }
     }
-
-    /// Runs while a pass has every icon on screen, so the drawer can picture them.
-    var whileRevealed: (() async -> Void)?
 
     /// Rescans and returns the icons, for callers that need them right away.
     func rescan() async -> [MenuBarItem] {
@@ -126,38 +119,29 @@ final class LayoutEngine: ObservableObject {
 
     // MARK: - Arranging
 
-    private struct Move {
-        let item: MenuBarItem
-        let target: Placement
-
-        /// Whether the icon should end up right of the divider.
-        var show: Bool { target.isShown }
-    }
-
     /// Where an icon goes in the bar.
     enum Placement: Equatable {
-        /// Right of the divider, at its left end.
-        case shown
-        /// Left of the divider, at its right end.
-        case hidden
         /// Just left of another icon, the divider or Perch, ending up shown or hidden.
         case before(Anchor, shown: Bool)
 
         var isShown: Bool {
-            switch self {
-            case .hidden, .before(_, shown: false): false
-            case .shown, .before(_, shown: true): true
-            }
+            if case .before(_, let shown) = self { return shown }
+            return true
         }
     }
 
     enum Anchor: Equatable {
         case icon(String)
+        /// The left end of the shown icons.
         case divider
         case perch
         /// The right end of the icons, just before the clock and Control Center.
         case end
     }
+
+    /// Apps whose icon has a new spot saved but which weren't restarted, because
+    /// restarting them could interrupt you (they have windows). Bundle ID → name.
+    @Published private(set) var waitingForRestart: [String: String] = [:]
 
     /// Tries again in 2 s, up to five times; the next trigger starts over.
     private func deferOrGiveUp() {
@@ -170,142 +154,254 @@ final class LayoutEngine: ObservableObject {
         }
     }
 
+    /// One pass. Nothing here touches the mouse:
+    /// - spots asked for in Arrange are saved as the icon's position, and its
+    ///   app restarts to pick it up (or waits, if restarting could interrupt you);
+    /// - what fits is settled by moving Perch's own divider, which is instant.
     private func arrange() async {
         guard !isArranging else {
             arrangeAgain = true
             return
         }
-        // Nothing can be moved behind the lock screen; unlocking triggers a pass.
-        if Self.screenIsLocked() { return }
-        // Don't fight the user: wait while a menu is open or a mouse button is
-        // down. Give up after a few tries; the next trigger tries again.
-        if Self.userIsBusy() {
+        // Recreating the divider would close an open menu; wait for it.
+        if MenuBarGeometry.isMenuOpen() || menuBar.isTemporaryReveal {
             deferOrGiveUp()
             return
         }
+        deferrals = 0
         isArranging = true
         defer {
             isArranging = false
-            menuBar.isBusy = false
             if arrangeAgain {
                 arrangeAgain = false
                 scheduleArrange()
             }
         }
 
-        let current = await scan()
-        let moves = plan(for: current)
-        let perchMove = perchPlacement
-        guard !moves.isEmpty || perchMove != nil else { return }
-        // Something opened during the scan (an icon from the drawer, say): try later.
-        if Self.userIsBusy() || menuBar.isTemporaryReveal {
-            deferOrGiveUp()
+        var current = await scan()
+        if !placements.isEmpty || perchPlacement != nil {
+            let requests = placements
+            let perchRequest = perchPlacement
+            placements.removeAll()
+            perchPlacement = nil
+            await apply(requests, perch: perchRequest, in: current)
+            current = await scan()
+        }
+        placeDivider(in: current)
+        await scan()
+    }
+
+    // MARK: Positions
+
+    /// Something in the bar with a position: an icon, or one of Perch's items.
+    private struct Entry {
+        enum Kind: Equatable { case icon(String), perch, fixed }
+        let kind: Kind
+        /// For ordering, left to right.
+        let x: CGFloat
+        let width: CGFloat
+        var position: Double?
+    }
+
+    /// Everything in the bar left to right with its saved position. Positions
+    /// Perch can't read are filled in between their neighbors, which is all
+    /// that matters: macOS only compares them.
+    private func entries(for items: [MenuBarItem]) -> [Entry] {
+        let slots = StatusItemPositions.slots(for: items)
+        var list = items.filter { $0.isInMenuBar && !$0.isLiveActivity && $0.identifier != "com.apple.menuextra.clock" }
+            .map { item in
+                Entry(kind: item.isFixed ? .fixed : .icon(item.key), x: item.frame.midX,
+                      width: item.frame.width, position: slots[item.key]?.value)
+            }
+        if let perch = menuBar.perchFrame() {
+            list.append(Entry(kind: .perch, x: perch.midX, width: perch.width, position: menuBar.perchPosition))
+        }
+        list.sort { $0.x < $1.x }
+        // Fill gaps: halfway between known neighbors, or a step past the last one.
+        for index in list.indices where list[index].position == nil {
+            let left = list[..<index].last(where: { $0.position != nil })?.position
+            let right = list[(index + 1)...].first(where: { $0.position != nil })?.position
+            switch (left, right) {
+            case let (l?, r?): list[index].position = (l + r) / 2
+            case let (l?, nil): list[index].position = l - 1
+            case let (nil, r?): list[index].position = r + 20
+            default: break
+            }
+        }
+        return list
+    }
+
+    /// A position just left of `right` and right of `left` (either may be nil).
+    private static func between(left: Double?, right: Double?) -> Double? {
+        switch (left, right) {
+        case let (l?, r?): return r + min(1, (l - r) / 2)
+        case let (nil, r?): return r + 1
+        case let (l?, nil): return l - 1
+        default: return nil
+        }
+    }
+
+    // MARK: Spots from Arrange
+
+    private func apply(_ requests: [String: Placement], perch perchRequest: Placement?, in items: [MenuBarItem]) async {
+        let slots = StatusItemPositions.slots(for: items)
+        var restarts: [NSRunningApplication: [(key: String, width: CGFloat, position: Double)]] = [:]
+        var systemRestart: NSRunningApplication?
+
+        for (key, placement) in requests {
+            guard let item = items.first(where: { $0.key == key }), item.isMovable,
+                  let slot = slots[key],
+                  let position = position(for: placement, moving: .icon(key), in: items)
+            else {
+                log.notice("can't save a spot for \(key, privacy: .public)")
+                continue
+            }
+            if let current = slot.value, abs(current - position) < 0.01 { continue }
+            StatusItemPositions.write(position, for: slot)
+            log.notice("saved a new spot for \(item.displayName, privacy: .public)")
+            guard let app = NSRunningApplication(processIdentifier: item.pid) else { continue }
+            if AppRestarter.isSystemAgent(app.bundleIdentifier ?? "") {
+                systemRestart = app
+            } else if AppRestarter.isSafeToRestart(app) {
+                restarts[app, default: []].append((key, item.frame.width, position))
+            } else if let bundleID = app.bundleIdentifier {
+                waitingForRestart[bundleID] = app.localizedName ?? item.displayName
+            }
+        }
+
+        if let perchRequest, let position = position(for: perchRequest, moving: .perch, in: items) {
+            menuBar.movePerch(to: position)
+        }
+
+        // Restart the apps. Each icon's new spot is held open while its app is
+        // away, so the bar doesn't jump around.
+        for (app, icons) in restarts {
+            for icon in icons { menuBar.holdSpot(for: icon.key, width: icon.width, at: icon.position) }
+            let restarted = await AppRestarter.restart(app)
+            if restarted, let bundleID = app.bundleIdentifier {
+                await waitForIcon(of: bundleID)
+            } else if let bundleID = app.bundleIdentifier {
+                waitingForRestart[bundleID] = app.localizedName ?? bundleID
+            }
+            for icon in icons { menuBar.releaseSpot(for: icon.key) }
+        }
+        if let systemRestart {
+            _ = await AppRestarter.restart(systemRestart)
+            try? await Task.sleep(for: .milliseconds(800))
+        }
+    }
+
+    /// Restarts an app that was waiting (from Arrange's "Restart" button).
+    func restartNow(_ bundleID: String) {
+        guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first else {
+            waitingForRestart[bundleID] = nil
             return
         }
-        deferrals = 0
-        placements.removeAll()
-        perchPlacement = nil
-        log.notice("arranging: \(moves.count) move(s)")
+        Task {
+            if await AppRestarter.restart(app) {
+                waitingForRestart[bundleID] = nil
+                await waitForIcon(of: bundleID)
+            }
+            scheduleArrange(after: 0.2)
+        }
+    }
 
-        let generation = stuckGeneration
-        // A bar that's out only for an opened icon goes back to hidden afterwards.
-        let wasRevealed = menuBar.visibility.isRevealed && !menuBar.isTemporaryReveal
-        menuBar.reveal(armAutoHide: false)
-        menuBar.isBusy = true
-        try? await Task.sleep(for: .milliseconds(350))
+    /// Waits up to 15 s for a restarted app's icon to come back. Checks only
+    /// that app, every 50 ms, so the spot held open for it is let go the
+    /// moment the icon arrives.
+    private func waitForIcon(of bundleID: String) async {
+        for _ in 0..<300 {
+            if let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first,
+               Self.hasIcon(app.processIdentifier) { return }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+    }
 
-        var attempted: [Move] = []
-        for move in moves {
-            // You started using the mouse or a menu, or locked the screen:
-            // stop and try again later.
-            if Self.userIsBusy() || Self.screenIsLocked() {
-                arrangeAgain = true
+    private static func hasIcon(_ pid: pid_t) -> Bool {
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 0.1)
+        var bar: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(app, "AXExtrasMenuBar" as CFString, &bar) == .success,
+              let bar, CFGetTypeID(bar) == AXUIElementGetTypeID() else { return false }
+        var children: CFTypeRef?
+        AXUIElementCopyAttributeValue(bar as! AXUIElement, kAXChildrenAttribute as CFString, &children)
+        return ((children as? [AXUIElement]) ?? []).contains { AX.frame(of: $0).map { $0.width > 0 } ?? false }
+    }
+
+    /// The saved position that puts `moving` just left of the placement's anchor.
+    private func position(for placement: Placement, moving: Entry.Kind, in items: [MenuBarItem]) -> Double? {
+        guard case .before(let anchor, _) = placement else { return nil }
+        let list = entries(for: items).filter { $0.kind != moving }
+        let anchorIndex: Int?
+        switch anchor {
+        case .icon(let key): anchorIndex = list.firstIndex { $0.kind == .icon(key) }
+        case .perch: anchorIndex = list.firstIndex { $0.kind == .perch }
+        case .end: anchorIndex = list.firstIndex { $0.kind == .fixed }
+        case .divider:
+            // The leftmost shown thing: the first entry right of the divider.
+            let dividerX = menuBar.dividerFrame()?.maxX ?? -.infinity
+            anchorIndex = list.firstIndex { $0.x > dividerX }
+        }
+        guard let index = anchorIndex else { return nil }
+        let left = index > 0 ? list[index - 1].position : nil
+        return Self.between(left: left, right: list[index].position)
+    }
+
+    // MARK: What fits
+
+    /// Puts the divider where the room runs out. Order is priority: icons
+    /// nearest the right get the room first, and once one doesn't fit (or you
+    /// want it hidden), it and everything left of it go to the hidden side.
+    private func placeDivider(in items: [MenuBarItem]) {
+        guard let screen = menuBar.screen else { return }
+        let inBar = items.filter(\.isInMenuBar)
+        let list = entries(for: items)
+        let gap = gap(in: inBar)
+
+        // Room between the notch (or the middle of the screen, where app menus
+        // can reach on screens without one) and the clock and Control Center.
+        let leftBound = screen.auxiliaryTopRightArea?.minX ?? screen.frame.midX
+        let rightBound = inBar.filter(\.isFixed).map(\.frame.minX).min() ?? screen.frame.maxX
+        // Icons macOS places itself (the mic indicator) take room too.
+        let reserved = inBar
+            .filter { !$0.isMovable && !$0.isFixed && $0.section == .shown }
+            .reduce(0) { $0 + $1.frame.width + gap }
+        var room = rightBound - leftBound - reserved - 8
+
+        // Walk right to left; `cut` ends up at the leftmost entry that stays shown.
+        let movable = list.filter { $0.kind != .fixed }
+        var cut = list.firstIndex { $0.kind == .fixed } ?? list.endIndex
+        for entry in movable.reversed() {
+            let cost = entry.width + gap
+            if case .icon(let key) = entry.kind {
+                guard preferences.priority(for: key) == .shown, cost <= room else { break }
+            } else if cost > room {
                 break
             }
-            // Counted even when it can't be dragged (off screen, say), so an
-            // icon Perch can't reach doesn't make the bar flash every time.
-            attempted.append(move)
-            guard let divider = menuBar.dividerFrame(),
-                  let from = AX.frame(of: move.item.element),
-                  MenuBarGeometry.isOnScreen(from, screen: menuBar.screen),
-                  let targetX = targetX(for: move.target, divider: divider, in: current)
-            else { continue }
-            let target = CGPoint(x: targetX, y: from.midY)
-            let start = CGPoint(x: from.midX, y: from.midY)
-            await Task.detached(priority: .userInitiated) {
-                IconMover.drag(from: start, to: target)
-            }.value
-            try? await Task.sleep(for: .milliseconds(150))
+            room -= cost
+            cut = list.firstIndex { $0.kind == entry.kind } ?? cut
         }
 
-        // Perch's own item, moved the same way as any other icon.
-        if let perchMove, !arrangeAgain, let divider = menuBar.dividerFrame(), let from = menuBar.perchFrame(),
-           let targetX = targetX(for: perchMove, divider: divider, in: current) {
-            let start = CGPoint(x: from.midX, y: from.midY)
-            let target = CGPoint(x: targetX, y: from.midY)
-            await Task.detached(priority: .userInitiated) {
-                IconMover.drag(from: start, to: target)
-            }.value
-            try? await Task.sleep(for: .milliseconds(150))
+        // Perch's own item always stays shown: if the cut fell right of it, move it over.
+        if let perchIndex = list.firstIndex(where: { $0.kind == .perch }), perchIndex < cut,
+           let position = Self.between(left: cut > 0 ? list[cut - 1].position : nil,
+                                       right: cut < list.count ? list[cut].position : nil) {
+            menuBar.movePerch(to: position)
+            return // Perch moved; the next scan places the divider.
         }
 
-        await whileRevealed?()
-        menuBar.isBusy = false
-        if wasRevealed {
-            menuBar.reveal()
-        } else {
-            menuBar.collapse()
+        let leftOfCut = cut > 0 ? list[cut - 1] : nil
+        let rightOfCut = cut < list.count ? list[cut] : nil
+        // Already there: the divider sits between those two.
+        if let divider = menuBar.dividerFrame() {
+            let afterLeft = leftOfCut.map { $0.x < divider.maxX } ?? true
+            let beforeRight = rightOfCut.map { divider.maxX < $0.x } ?? true
+            if afterLeft && beforeRight { return }
         }
-        try? await Task.sleep(for: .milliseconds(300))
-        let after = await scan()
-
-        // Only judge the moves if the bar is in a known state and your
-        // priorities didn't change while they ran.
-        guard menuBar.dividerFrame() != nil, generation == stuckGeneration else { return }
-        for move in attempted {
-            guard let now = after.first(where: { $0.key == move.item.key }) else { continue }
-            if (now.section == .shown) != move.show {
-                log.notice("\(move.item.displayName, privacy: .public) didn't move; skipping it for now")
-                stuck[move.item.key] = now.frame.minX
-            }
-        }
-    }
-
-    /// Where to drop an icon. macOS puts a ⌘-dragged icon before whichever icon
-    /// it's dropped on the left half of, so aim just inside the anchor's left edge.
-    private func targetX(for placement: Placement, divider: CGRect, in items: [MenuBarItem]) -> CGFloat? {
-        switch placement {
-        case .shown: return divider.maxX + 3
-        case .hidden, .before(.divider, _): return divider.minX - 3
-        case .before(.perch, _): return menuBar.perchFrame().map { $0.minX + 2 }
-        case .before(.end, _):
-            // Control Center's left half; failing that, past the last icon.
-            if let fixed = items.filter(\.isFixed).compactMap({ AX.frame(of: $0.element) }).min(by: { $0.minX < $1.minX }) {
-                return fixed.minX + 2
-            }
-            return items.filter { $0.section == .shown }.map(\.frame.maxX).max().map { $0 - 2 }
-        case .before(.icon(let key), _):
-            guard let anchor = items.first(where: { $0.key == key }),
-                  let frame = AX.frame(of: anchor.element),
-                  MenuBarGeometry.isOnScreen(frame, screen: menuBar.screen)
-            else {
-                // The neighbor is off screen (hidden, or no room): fall back to the side.
-                return targetX(for: placement.isShown ? .shown : .hidden, divider: divider, in: items)
-            }
-            return frame.minX + min(2, frame.width / 4)
-        }
-    }
-
-    private static func screenIsLocked() -> Bool {
-        let session = CGSessionCopyCurrentDictionary() as? [String: Any]
-        return session?["CGSSessionScreenIsLocked"] as? Bool ?? false
-    }
-
-    /// A real (not synthetic) mouse button is down, or a menu is open.
-    private static func userIsBusy() -> Bool {
-        CGEventSource.buttonState(.hidSystemState, button: .left)
-            || CGEventSource.buttonState(.hidSystemState, button: .right)
-            || MenuBarGeometry.isMenuOpen()
+        guard let position = Self.between(left: leftOfCut?.position, right: rightOfCut?.position) else { return }
+        let shownCount = list[cut...].filter { $0.kind != .fixed }.count
+        log.notice("moving the divider so \(shownCount, privacy: .public) icons show")
+        menuBar.moveDivider(to: position)
     }
 
     /// The space macOS leaves between neighboring icons, from the bar itself.
@@ -318,67 +414,9 @@ final class LayoutEngine: ObservableObject {
         return gaps.isEmpty ? 8 : gaps[gaps.count / 2]
     }
 
-    /// Works out which icons need to cross the divider.
-    private func plan(for items: [MenuBarItem]) -> [Move] {
-        guard let screen = menuBar.screen else { return [] }
-        let inBar = items.filter { $0.isInMenuBar }
-        let movable = inBar.filter { item in
-            if !item.isMovable { return false }
-            if let x = stuck[item.key], abs(x - item.frame.minX) < 1 { return false }
-            return true
-        }
-
-        // Room between the notch (or the middle of the screen, where app menus
-        // can reach on screens without one) and the clock and Control Center.
-        let leftBound = screen.auxiliaryTopRightArea?.minX ?? screen.frame.midX
-        let rightBound = inBar.filter(\.isFixed).map(\.frame.minX).min() ?? screen.frame.maxX
-        // Icons Perch won't move (the mic indicator, stuck ones) and Perch's
-        // own item take up room too.
-        let movableKeys = Set(movable.map(\.key))
-        let reserved = inBar
-            .filter { !movableKeys.contains($0.key) && !$0.isFixed && $0.section == .shown }
-            .reduce(0) { $0 + $1.frame.width + gap(in: inBar) }
-            + (menuBar.perchFrame().map { $0.width + gap(in: inBar) } ?? 0)
-        var room = rightBound - leftBound - reserved - 8
-
-        // Order is priority: the icons nearest the right get the room first,
-        // and once one doesn't fit, everything left of it waits in hidden.
-        var wantShown = Set<String>()
-        let wanted = movable
-            .filter { priority(of: $0) == .shown }
-            .sorted { $0.frame.minX > $1.frame.minX }
-        for item in wanted {
-            let cost = item.frame.width + gap(in: inBar)
-            guard cost <= room else { break }
-            wantShown.insert(item.key)
-            room -= cost
-        }
-
-        // Spots asked for in Arrange go first; they also settle the icon's side.
-        let placed = inBar.filter(\.isMovable).compactMap { item in
-            placements[item.key].map { Move(item: item, target: $0) }
-        }
-        let placedKeys = Set(placed.map(\.item.key))
-
-        let moves = movable.compactMap { item -> Move? in
-            guard !placedKeys.contains(item.key) else { return nil }
-            let shouldShow = wantShown.contains(item.key)
-            let isShown = item.section == .shown
-            return shouldShow == isShown ? nil : Move(item: item, target: shouldShow ? .shown : .hidden)
-        }
-        // Hides first, to make room. Then shows, nearest the divider first, so
-        // each one pulls the next hidden icon out from behind the notch.
-        let hides = moves.filter { !$0.show }
-        let shows = moves.filter(\.show).sorted { $0.item.frame.minX > $1.item.frame.minX }
-        return hides + placed + shows
-    }
-
     // MARK: - Triggers
 
-    /// After a display change, wake or unlock, give stuck icons another try.
     private func retry(after delay: TimeInterval) {
-        stuckGeneration += 1
-        stuck.removeAll()
         scheduleArrange(after: delay)
     }
 
@@ -387,11 +425,7 @@ final class LayoutEngine: ObservableObject {
 
         preferences.$priorities
             .dropFirst()
-            .sink { [weak self] _ in
-                self?.stuckGeneration += 1
-                self?.stuck.removeAll()
-                self?.scheduleArrange()
-            }
+            .sink { [weak self] _ in self?.scheduleArrange() }
             .store(in: &cancellables)
 
         // Accessibility granted after launch: list the icons and arrange them.
@@ -411,8 +445,7 @@ final class LayoutEngine: ObservableObject {
         ) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                // This fires for small things too (the Dock, say). Only retry
-                // stuck icons when the displays themselves changed.
+                // This fires for small things too (the Dock, say).
                 let frames = NSScreen.screens.map(\.frame)
                 if frames != self.lastScreenFrames {
                     self.lastScreenFrames = frames
@@ -435,11 +468,18 @@ final class LayoutEngine: ObservableObject {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.retry(after: 3) }
         })
-        // A newly opened app adds its icon on the far left (the hidden side).
-        // Arrange so an Auto icon gets shown if there's room.
+        // Icons come and go with their apps, which changes what fits.
         for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
-            observers.append(workspace.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.scheduleArrange(after: 3) }
+            observers.append(workspace.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+                MainActor.assumeIsolated {
+                    // An app that was waiting to restart has: its icon is in its new spot.
+                    if name == NSWorkspace.didLaunchApplicationNotification,
+                       let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                       let bundleID = app.bundleIdentifier {
+                        self?.waitingForRestart[bundleID] = nil
+                    }
+                    self?.scheduleArrange(after: 3)
+                }
             })
         }
     }

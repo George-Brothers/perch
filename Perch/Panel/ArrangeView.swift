@@ -77,6 +77,16 @@ struct ArrangeBar: View {
                 .onPreferenceChange(ContentWidth.self) { contentWidth = $0 }
                 .animation(.snappy(duration: 0.18), value: rows)
 
+                ForEach(engine.waitingForRestart.sorted(by: { $0.value < $1.value }), id: \.key) { bundleID, name in
+                    HStack(spacing: 8) {
+                        Text("\(name) moves when it restarts.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                        Button("Restart Now") { engine.restartNow(bundleID) }
+                            .controlSize(.small)
+                    }
+                }
+
                 Text(offHint ?? "Drag icons to reorder them or move them between rows. When the bar is full, icons on the left wait in Hidden.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
@@ -171,8 +181,8 @@ struct ArrangeBar: View {
         Text(item.displayName)
         Divider()
         switch row {
-        case .bar: Button("Hide") { engine.setPriority(.hidden, for: item) }
-        case .hidden: Button("Show in Menu Bar") { engine.setPriority(.shown, for: item) }
+        case .bar: Button("Hide") { engine.place(item, .before(.divider, shown: false), priority: .hidden) }
+        case .hidden: Button("Show in Menu Bar") { engine.place(item, .before(.divider, shown: true), priority: .shown) }
         case .off: Button("Turn On in System Settings…") { explainOff(item) }
         }
     }
