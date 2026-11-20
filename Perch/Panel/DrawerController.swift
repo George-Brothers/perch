@@ -187,19 +187,19 @@ struct DrawerView: View {
         engine.inHiddenOrder(engine.items.filter { $0.section == .hidden })
     }
 
+    /// How wide the icons are, to scroll them when they don't fit the screen.
+    @State private var iconsWidth: CGFloat = 0
+
     var body: some View {
-        HStack(spacing: 0) {
-            if hidden.isEmpty {
-                Text(engine.hasScanned ? "No hidden icons" : " ")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 10)
+        let room = (NSScreen.main?.visibleFrame.width ?? 1400) - 24
+        Group {
+            if iconsWidth > room {
+                // Starts at the right end, nearest the menu bar's own icons.
+                ScrollView(.horizontal, showsIndicators: false) { icons }
+                    .defaultScrollAnchor(.trailing)
+                    .frame(width: room)
             } else {
-                ForEach(hidden) { item in
-                    DrawerIcon(item: item, image: images.image(for: item), invert: !images.iconsAreLight,
-                               isActive: state.activeKey == item.key, onOpen: onOpen)
-                        .contextMenu { priorityMenu(for: item) }
-                }
+                icons
             }
         }
         .frame(minHeight: 24)
@@ -208,6 +208,28 @@ struct DrawerView: View {
         .perchSurface(Capsule(style: .continuous))
         .fixedSize()
         .padding(1)
+        .onPreferenceChange(DrawerIconsWidth.self) { iconsWidth = $0 }
+    }
+
+    private var icons: some View {
+        HStack(spacing: 0) {
+            if hidden.isEmpty {
+                Text(engine.hasScanned ? "No hidden icons" : " ")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 10)
+            } else {
+                ForEach(hidden) { item in
+                    DrawerIcon(item: item, image: images.image(for: item), invert: !images.isLight(item),
+                               isActive: state.activeKey == item.key, onOpen: onOpen)
+                        .contextMenu { priorityMenu(for: item) }
+                }
+            }
+        }
+        .fixedSize()
+        .background(GeometryReader { geometry in
+            Color.clear.preference(key: DrawerIconsWidth.self, value: geometry.size.width)
+        })
     }
 
     @ViewBuilder
@@ -226,6 +248,11 @@ struct DrawerView: View {
         Divider()
         Button("Arrange Icons…", action: onArrange)
     }
+}
+
+private struct DrawerIconsWidth: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
 
 /// What Perch's bar is showing right now.

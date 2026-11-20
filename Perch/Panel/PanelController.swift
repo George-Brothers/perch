@@ -151,8 +151,7 @@ final class PanelController {
             matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
         ) { [weak self] _ in
             MainActor.assumeIsolated {
-                // Perch's own icon moves are clicks too; they shouldn't close the list.
-                // Empty menu bar space toggles the panel itself (see MenuBarController).
+                // Not while icons are moving. Empty menu bar space toggles the panel itself (see MenuBarController).
                 guard let self, !MenuBarGeometry.isEmptyMenuBarSpace(NSEvent.mouseLocation), !self.model.isArranging else { return }
                 self.close()
             }

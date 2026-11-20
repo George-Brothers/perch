@@ -313,6 +313,13 @@ struct LoginToggle: View {
                     .controlSize(.small)
             }
         }
+        .onAppear(perform: refresh)
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in refresh() }
+    }
+
+    private func refresh() {
+        on = LaunchAtLogin.isEnabled || LaunchAtLogin.needsApproval
+        needsApproval = LaunchAtLogin.needsApproval
     }
 }
 
@@ -401,6 +408,7 @@ private struct MiniArrange: View {
                     .foregroundStyle(Color.accentColor)
                 Image(systemName: "waveform")
                     .font(.system(size: 12))
+                    .foregroundStyle(.white)
                     .frame(width: 26, height: 22)
                     .background(Color(white: 0.24), in: RoundedRectangle(cornerRadius: 6))
                     .shadow(color: .black.opacity(0.35), radius: 3, y: 1)

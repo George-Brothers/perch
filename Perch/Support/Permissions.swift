@@ -47,10 +47,6 @@ final class Permissions: ObservableObject {
         refresh()
     }
 
-    func openAccessibilitySettings() {
-        openPrivacyPane("Privacy_Accessibility")
-    }
-
     /// Asks macOS for Screen Recording. macOS shows its prompt only the first
     /// time; after that the switch lives in System Settings, so open it there.
     func requestScreenRecording() {
@@ -76,9 +72,9 @@ final class Permissions: ObservableObject {
         let path = Bundle.main.bundlePath
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/bin/sh")
-        // Wait for this copy to quit (up to 5 s), then open a fresh one.
+        // Wait for this copy to quit (up to 30 s: it finishes a move first), then open a fresh one.
         let pid = ProcessInfo.processInfo.processIdentifier
-        task.arguments = ["-c", "for i in $(seq 50); do kill -0 $1 2>/dev/null || break; sleep 0.1; done; /usr/bin/open -n \"$0\"", path, String(pid)]
+        task.arguments = ["-c", "for i in $(seq 300); do kill -0 $1 2>/dev/null || break; sleep 0.1; done; /usr/bin/open -n \"$0\"", path, String(pid)]
         try? task.run()
         NSApp.terminate(nil)
     }

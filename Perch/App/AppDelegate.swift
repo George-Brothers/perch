@@ -287,7 +287,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// close: after you pick something, or if the icon had to come out into
     /// the menu bar. Closing its menu without picking leaves the bar open.
     private func openFromBar(_ item: MenuBarItem, at point: NSPoint) async -> Bool {
-        switch await MenuMirror.open(item, at: point) {
+        switch await MenuMirror.open(item, at: point, stillWanted: { [weak self] in self?.drawer.isOpen == true }) {
         case .picked: return true
         case .dismissed, .panel: return false
         case .failed:
@@ -321,6 +321,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// When Spotlight last opened an icon, so the reopen that comes with it
     /// doesn't also show Settings.
     private var openedFromSpotlight: Date?
+
+    /// A move that's under way finishes before Perch quits (up to 25 s): its
+    /// new spots are already saved, and quitting midway would leave them for
+    /// the next restart to apply unchecked. Closing Arrange lets held moves go.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard engine != nil else { return .terminateNow }
+        arrangePanel.close()
+        guard engine.isArranging || engine.hasQueuedMoves else { return .terminateNow }
+        Task { @MainActor in
+            for _ in 0..<125 where engine.isArranging || engine.hasQueuedMoves {
+                try? await Task.sleep(for: .milliseconds(200))
+            }
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
 
     /// Opening Perch again (from Finder, Spotlight or the Dock) shows Settings,
     /// so there is always a way back in even if the menu bar icon is out of view.

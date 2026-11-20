@@ -236,7 +236,11 @@ enum AppRestarter {
         for _ in 0..<60 where !app.isTerminated { try? await Task.sleep(for: .milliseconds(50)) }
         for _ in 0..<240 {
             if let next = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.controlcenter").first,
-               next.processIdentifier != app.processIdentifier, next.isFinishedLaunching { break }
+               next.processIdentifier != app.processIdentifier, next.isFinishedLaunching {
+                // launchd counts its 10 s from the new launch, so the spacing does too.
+                lastRestart = Date()
+                break
+            }
             try? await Task.sleep(for: .milliseconds(50))
         }
         try? await Task.sleep(for: .milliseconds(300))

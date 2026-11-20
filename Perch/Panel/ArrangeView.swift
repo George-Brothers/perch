@@ -194,7 +194,7 @@ struct ArrangeBar: View {
             EmptyView()
         case .icon(let key):
             if let item = item(key) {
-                BarIcon(item: item, image: images.image(for: item), invert: !images.iconsAreLight,
+                BarIcon(item: item, image: images.image(for: item), invert: !images.isLight(item),
                         width: item.frame.width, maxHeight: height,
                         waiting: engine.isArranging ? nil : waitingNote(for: item, in: row),
                         clickable: onOpenItem != nil && !engine.isArranging)
@@ -208,7 +208,7 @@ struct ArrangeBar: View {
     /// A Live Activity or the mic and camera dot: macOS puts these at the left
     /// end of the menu bar itself, so they're shown there and can't be dragged.
     private func pinnedView(_ item: MenuBarItem) -> some View {
-        BarIcon(item: item, image: images.image(for: item), invert: !images.iconsAreLight,
+        BarIcon(item: item, image: images.image(for: item), invert: !images.isLight(item),
                 width: item.frame.width, maxHeight: height, waiting: nil, clickable: false,
                 tooltip: item.isLiveActivity
                     ? "\(item.displayName) Live Activity. macOS always puts these at the left end of the menu bar, so Perch makes room for them. It goes away when the app ends it."
@@ -236,7 +236,7 @@ struct ArrangeBar: View {
                     PerchMark(preferences: preferences, width: engine.perchWidth)
                 case .icon(let key):
                     if let item = item(key) {
-                        BarIcon(item: item, image: images.image(for: item), invert: !images.iconsAreLight,
+                        BarIcon(item: item, image: images.image(for: item), invert: !images.isLight(item),
                                 width: nil, maxHeight: height, waiting: nil, clickable: false)
                     }
                 case .split:
@@ -269,7 +269,15 @@ struct ArrangeBar: View {
                 }
                 drag?.location = value.location
             }
-            .onEnded { _ in commit() }
+            .onEnded { value in
+                // Let go well away from the strip: you changed your mind.
+                let p = value.location
+                guard p.y > -height, p.y < height * 2, p.x > -40, p.x < stripWidth + 40 else {
+                    arrangeLog.debug("dropped outside Arrange; nothing moves")
+                    return
+                }
+                commit()
+            }
     }
 
     // MARK: - Order
@@ -504,8 +512,7 @@ private struct BarIcon: View {
     let width: CGFloat?
     /// Pictures are drawn at their real size, up to the strip's height.
     let maxHeight: CGFloat
-    /// Why it's drawn faded: it isn't in its row's spot yet (no room, or its
-    /// app hasn't reopened since you moved it).
+    /// Why it's drawn faded: it's on the menu bar side but there's no room for it.
     let waiting: String?
     let clickable: Bool
     var tooltip: String?
@@ -630,10 +637,19 @@ struct ArrangePanelView: View {
 
     /// One dark bar under the menu bar: the gear, then the strip.
     private var below: some View {
-        HStack(alignment: .top, spacing: 2) {
+        // With a lot of icons the strip can be wider than the screen: then it
+        // scrolls, starting at the right end, and the gear stays put.
+        let room = (NSScreen.main?.visibleFrame.width ?? 1400) - 80
+        return HStack(alignment: .top, spacing: 2) {
             SettingsGear(action: onOpenSettings)
                 .frame(height: 32)
-            strip()
+            if stripWidth > room {
+                ScrollView(.horizontal, showsIndicators: false) { strip() }
+                    .defaultScrollAnchor(.trailing)
+                    .frame(width: room)
+            } else {
+                strip()
+            }
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 4)
@@ -645,8 +661,11 @@ struct ArrangePanelView: View {
     /// the strip doesn't fit (beside a notch), it's the bar under the menu bar instead.
     @ViewBuilder
     private func over(_ geometry: OverBarGeometry) -> some View {
-        let band = geometry.bandEnd - geometry.bandStart
-        let fits = stripWidth == 0 || stripWidth + 12 <= band
+        let band = max(0, geometry.bandEnd - geometry.bandStart)
+        // Before Accessibility (or the first scan), Arrange is a card that
+        // can't squeeze into the menu bar's height.
+        let ready = permissions.hasAccessibility && engine.hasScanned
+        let fits = ready && (stripWidth == 0 || stripWidth + 12 <= band)
         VStack(alignment: .leading, spacing: 6) {
             if fits {
                 HStack(spacing: 0) {

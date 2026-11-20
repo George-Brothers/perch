@@ -139,6 +139,13 @@ struct SetupView: View {
             para(barItemNote)
                 .padding(.top, 4)
 
+        case .ready where !permissions.hasAccessibility:
+            title("One step left")
+            para("Perch can't see your menu bar icons until you allow Accessibility. Until then, it doesn't hide anything.")
+            Button("Allow Accessibility…") { permissions.requestAccessibility() }
+                .buttonStyle(.borderedProminent)
+                .padding(.top, 4)
+
         case .ready:
             title("Perch is ready")
             VStack(alignment: .leading, spacing: 10) {

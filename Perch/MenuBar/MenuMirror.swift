@@ -63,7 +63,10 @@ enum MenuMirror {
 
     /// Opens a hidden icon with its menu's top-left corner at `point` (screen
     /// coordinates, bottom-left origin). Returns once its menu has closed.
-    static func open(_ item: MenuBarItem, at point: NSPoint) async -> Outcome {
+    /// `stillWanted` is asked once the menu is read: Perch's bar may have
+    /// closed meanwhile, and then the copy shouldn't pop up on its own.
+    static func open(_ item: MenuBarItem, at point: NSPoint,
+                     stillWanted: () -> Bool = { true }) async -> Outcome {
         let element = item.element
         let pid = item.pid
         let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
@@ -78,6 +81,7 @@ enum MenuMirror {
         }.value
         switch result {
         case .menu(let entries):
+            guard stillWanted() else { return .dismissed }
             return show(entries, for: item, at: point) ? .picked : .dismissed
         case .panel:
             return .panel
@@ -102,12 +106,13 @@ enum MenuMirror {
             if let menu = AX.elements(element, kAXChildrenAttribute).first(where: { AX.string($0, kAXRoleAttribute) == "AXMenu" }) {
                 let entries = read(menu, path: [], titles: [], levels: [])
                 _ = AXUIElementPerformAction(menu, kAXCancelAction as CFString)
-                return .menu(entries)
+                // Custom views with no titles can't be copied: show the real one instead.
+                return entries.contains { !$0.title.isEmpty || !$0.children.isEmpty } ? .menu(entries) : .nothing
             }
             // A panel that just opened off screen: bring it under Perch's bar.
             for window in AX.elements(app, kAXWindowsAttribute) where !windowsBefore.contains(CFHash(window)) {
                 guard let frame = AX.frame(of: window), !screens.contains(where: { $0.intersects(frame) }) else { continue }
-                let screen = screens.min { abs($0.minX - panelOrigin.x) < abs($1.minX - panelOrigin.x) } ?? .zero
+                let screen = screens.first { $0.minX <= panelOrigin.x && panelOrigin.x < $0.maxX } ?? screens.first ?? .zero
                 var origin = CGPoint(x: min(panelOrigin.x, screen.maxX - frame.width - 8), y: panelOrigin.y)
                 origin.x = max(origin.x, screen.minX + 8)
                 if let value = AXValueCreate(.cgPoint, &origin),

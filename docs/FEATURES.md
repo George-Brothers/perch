@@ -5,7 +5,7 @@ Perch is a light menu bar manager for macOS. The goal: the menu bar macOS should
 ## The rules
 
 1. **Do nothing until something changes.** No timers, no background screenshots. Perch reacts to what macOS already announces: an app opening or quitting, a display change, wake, unlock, a click.
-2. **Improve the menu bar, never take from it.** Perch's own footprint is one small icon and a hairline divider.
+2. **Improve the menu bar, never take from it.** By default Perch adds nothing you can see to the menu bar; a thin line or a small icon are options.
 3. **No surprise permissions.** Accessibility is required. Screen Recording is opt-in, behind a switch, with an explanation first.
 4. **Never touch the mouse.** Perch moves icons by saving their positions, never with synthetic clicks or drags, and waits while a menu is open.
 
