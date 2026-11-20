@@ -444,10 +444,11 @@ final class LayoutEngine: ObservableObject {
             moved = true
             await menuBar.settle()
             current = await settledScan()
+            let missed = learnFromLastMove(current)
             // macOS put it right back: the spot Perch chose is on the wrong
-            // side of an icon whose position it had to guess. Trying again
-            // this pass would only make the same guess.
-            if let divider = before.0, let after = menuBar.dividerFrame(), abs(after.maxX - divider.maxX) < 1,
+            // side of an icon whose position it had to guess. Try again with
+            // what that showed; with nothing new, the next change will.
+            if !missed, let divider = before.0, let after = menuBar.dividerFrame(), abs(after.maxX - divider.maxX) < 1,
                before.1?.minX == menuBar.perchFrame()?.minX {
                 log.notice("the divider landed where it was; trying again on the next change")
                 break
@@ -493,6 +494,57 @@ final class LayoutEngine: ObservableObject {
         var isGuess = false
     }
 
+    /// What Perch has learned about positions it can't read, from which side
+    /// of its own items they ended up on: the real one is above `low` and
+    /// below `high`. Kept until it stops fitting the neighbors.
+    private var learnedBounds: [String: (low: Double?, high: Double?)] = [:]
+
+    /// Perch's last move next to guessed positions, checked once the bar settles.
+    private struct GuessedMove {
+        enum Mover { case divider, perch }
+        let mover: Mover
+        let position: Double
+        /// Each guessed neighbor and whether it should end up left of the mover.
+        let neighbors: [(key: String, wantsLeft: Bool)]
+    }
+    private var lastGuessedMove: GuessedMove?
+
+    private static func guessedNeighbors(_ left: Entry?, _ right: Entry?) -> [(key: String, wantsLeft: Bool)] {
+        var result: [(key: String, wantsLeft: Bool)] = []
+        if let left, left.isGuess, case .icon(let key) = left.kind { result.append((key, true)) }
+        if let right, right.isGuess, case .icon(let key) = right.kind { result.append((key, false)) }
+        return result
+    }
+
+    /// Which side of Perch's item a guessed neighbor landed on says which side
+    /// of the position Perch used its real one is on (smaller is further
+    /// right). True if one landed on the wrong side.
+    private func learnFromLastMove(_ items: [MenuBarItem]) -> Bool {
+        guard let move = lastGuessedMove else { return false }
+        lastGuessedMove = nil
+        let edge = move.mover == .divider ? menuBar.dividerFrame()?.maxX : menuBar.perchFrame()?.midX
+        guard let edge else { return false }
+        var missed = false
+        for (key, wantsLeft) in move.neighbors {
+            guard let item = items.first(where: { $0.key == key }), item.isInMenuBar, item.frame.width > 0 else { continue }
+            let isLeft = item.frame.midX < edge
+            var bounds = learnedBounds[key] ?? (nil, nil)
+            if isLeft {
+                bounds.low = max(bounds.low ?? -.infinity, move.position)
+                if let high = bounds.high, high <= move.position { bounds.high = nil }
+            } else {
+                bounds.high = min(bounds.high ?? .infinity, move.position)
+                if let low = bounds.low, low >= move.position { bounds.low = nil }
+            }
+            learnedBounds[key] = bounds
+            if isLeft != wantsLeft {
+                missed = true
+                log.notice("a guessed position was off; guessing closer")
+            }
+        }
+        return missed
+    }
+
     /// Everything in the bar left to right with its saved position. Positions
     /// Perch can't read are filled in between their neighbors, which is all
     /// that matters: macOS only compares them.
@@ -511,8 +563,23 @@ final class LayoutEngine: ObservableObject {
         // Fill gaps: halfway between known neighbors, or a step past the last one.
         for index in list.indices where list[index].position == nil {
             list[index].isGuess = true
-            let left = list[..<index].last(where: { $0.position != nil })?.position
-            let right = list[(index + 1)...].first(where: { $0.position != nil })?.position
+            var left = list[..<index].last(where: { $0.position != nil })?.position
+            var right = list[(index + 1)...].first(where: { $0.position != nil })?.position
+            // Narrow it with what earlier moves showed, while that still fits
+            // the known neighbors (a guessed one beside it proves nothing).
+            if case .icon(let key) = list[index].kind, let learned = learnedBounds[key] {
+                let knownLeft = list[..<index].last(where: { !$0.isGuess && $0.position != nil })?.position
+                let knownRight = list[(index + 1)...].first(where: { !$0.isGuess && $0.position != nil })?.position
+                let high = [knownLeft, learned.high].compactMap { $0 }.min()
+                let low = [knownRight, learned.low].compactMap { $0 }.max()
+                if let high, let low, high <= low {
+                    learnedBounds[key] = nil
+                } else {
+                    // Inside the bounds, and below a guessed neighbor's guess when that leaves room.
+                    if let l = left, l > (low ?? -.infinity) { left = min(l, high ?? l) } else { left = high }
+                    right = low
+                }
+            }
             switch (left, right) {
             case let (l?, r?): list[index].position = (l + r) / 2
             case let (l?, nil): list[index].position = l - 1
@@ -531,14 +598,32 @@ final class LayoutEngine: ObservableObject {
         let right = rightEntry?.position
         switch (left, right) {
         case let (l?, r?) where leftEntry?.isGuess == true && rightEntry?.isGuess != true:
-            return r + min(0.05, (l - r) / 16)
+            return representable(r + min(0.05, (l - r) / 16), between: l, and: r, leftIsGuess: true)
         case let (l?, r?) where rightEntry?.isGuess == true && leftEntry?.isGuess != true:
-            return l - min(0.05, (l - r) / 16)
-        case let (l?, r?): return r + min(1, (l - r) / 2)
+            return representable(l - min(0.05, (l - r) / 16), between: l, and: r, rightIsGuess: true)
+        case let (l?, r?):
+            return representable(r + min(1, (l - r) / 2), between: l, and: r,
+                                 leftIsGuess: leftEntry?.isGuess == true, rightIsGuess: rightEntry?.isGuess == true)
         case let (nil, r?): return r + 1
         case let (l?, nil): return l - 1
         default: return nil
         }
+    }
+
+    /// `value`, or the nearest spot macOS can keep (32-bit) that's still
+    /// strictly between `l` and `r` (a hug that rounds onto a neighbor's spot
+    /// would tie with it). A guessed neighbor's spot is only an estimate, so
+    /// that side is checked against it as is. Nil if there's none.
+    private static func representable(_ value: Double, between l: Double, and r: Double,
+                                      leftIsGuess: Bool = false, rightIsGuess: Bool = false) -> Double? {
+        let fl = Float(l), fr = Float(r)
+        func fits(_ c: Float) -> Bool {
+            (rightIsGuess ? Double(c) > r : c > fr) && (leftIsGuess ? Double(c) < l : c < fl)
+        }
+        if fits(Float(value)) { return value }
+        // The nearest that does; none means moving the divider couldn't land.
+        return [fr.nextUp, fl.nextDown].filter(fits).min { abs(Double($0) - value) < abs(Double($1) - value) }
+            .map(Double.init)
     }
 
     // MARK: Spots from Arrange
@@ -1038,6 +1123,9 @@ final class LayoutEngine: ObservableObject {
                 cut = perchIndex
             } else if let position = Self.between(cut > 0 ? list[cut - 1] : nil, cut < list.count ? list[cut] : nil),
                       menuBar.movePerch(to: position) {
+                lastGuessedMove = GuessedMove(mover: .perch, position: position,
+                                              neighbors: Self.guessedNeighbors(cut > 0 ? list[cut - 1] : nil,
+                                                                               cut < list.count ? list[cut] : nil))
                 return true
             }
         }
@@ -1057,6 +1145,8 @@ final class LayoutEngine: ObservableObject {
         }
         guard let position = Self.between(leftOfCut, rightOfCut) else { return false }
         guard menuBar.moveDivider(to: position) else { return false }
+        lastGuessedMove = GuessedMove(mover: .divider, position: position,
+                                      neighbors: Self.guessedNeighbors(leftOfCut, rightOfCut))
         let shownCount = list[cut...].filter { $0.kind != .fixed }.count
         log.notice("moving the divider so \(shownCount, privacy: .public) icons show")
         return true
