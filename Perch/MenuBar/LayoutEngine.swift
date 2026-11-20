@@ -55,11 +55,10 @@ final class LayoutEngine: ObservableObject {
             setHiddenOrder(item.key, before: anchor)
         }
         placements[item.key] = placement
-        if preferences.priority(for: item.key) != priority {
-            preferences.setPriority(priority, for: item.key) // schedules a pass
-        } else {
-            scheduleArrange(after: 0.05)
-        }
+        preferences.setPriority(priority, for: item.key)
+        // Right away: you just dropped it. (Replaces the slower pass the
+        // priority change schedules for other triggers.)
+        scheduleArrange(after: 0.02)
     }
 
     /// Where to put Perch's own item (its line or icon), from Arrange.
@@ -96,6 +95,9 @@ final class LayoutEngine: ObservableObject {
 
     // MARK: - Scanning
 
+    /// Each icon's saved spot, read with the last scan.
+    private var slots: [String: StatusItemPositions.Slot] = [:]
+
     @discardableResult
     private func scan() async -> [MenuBarItem] {
         permissions.refresh()
@@ -104,6 +106,8 @@ final class LayoutEngine: ObservableObject {
             return []
         }
         let found = await MenuBarScanner.scan()
+        // Reading saved spots talks to other processes; never on the main thread.
+        slots = await Task.detached(priority: .userInitiated) { StatusItemPositions.slots(for: found) }.value
         let dividerMidX = menuBar.dividerFrame()?.midX
         items = found.map { item in
             var item = item
@@ -214,13 +218,15 @@ final class LayoutEngine: ObservableObject {
         let x: CGFloat
         let width: CGFloat
         var position: Double?
+        /// Perch couldn't read this position (a sandboxed app's, say) and
+        /// filled it in from its neighbors; the real one is somewhere between them.
+        var isGuess = false
     }
 
     /// Everything in the bar left to right with its saved position. Positions
     /// Perch can't read are filled in between their neighbors, which is all
     /// that matters: macOS only compares them.
     private func entries(for items: [MenuBarItem]) -> [Entry] {
-        let slots = StatusItemPositions.slots(for: items)
         var list = items.filter { $0.isInMenuBar && !$0.isLiveActivity && $0.identifier != "com.apple.menuextra.clock" }
             .map { item in
                 // A waiting move's saved spot isn't where the icon is yet.
@@ -234,6 +240,7 @@ final class LayoutEngine: ObservableObject {
         list.sort { $0.x < $1.x }
         // Fill gaps: halfway between known neighbors, or a step past the last one.
         for index in list.indices where list[index].position == nil {
+            list[index].isGuess = true
             let left = list[..<index].last(where: { $0.position != nil })?.position
             let right = list[(index + 1)...].first(where: { $0.position != nil })?.position
             switch (left, right) {
@@ -247,8 +254,16 @@ final class LayoutEngine: ObservableObject {
     }
 
     /// A position just left of `right` and right of `left` (either may be nil).
-    private static func between(left: Double?, right: Double?) -> Double? {
+    /// Next to a guessed position, it hugs the neighbor Perch knows: the real
+    /// position could be anywhere on the guessed side.
+    private static func between(_ leftEntry: Entry?, _ rightEntry: Entry?) -> Double? {
+        let left = leftEntry?.position
+        let right = rightEntry?.position
         switch (left, right) {
+        case let (l?, r?) where leftEntry?.isGuess == true && rightEntry?.isGuess != true:
+            return r + min(0.05, (l - r) / 2)
+        case let (l?, r?) where rightEntry?.isGuess == true && leftEntry?.isGuess != true:
+            return l - min(0.05, (l - r) / 2)
         case let (l?, r?): return r + min(1, (l - r) / 2)
         case let (nil, r?): return r + 1
         case let (l?, nil): return l - 1
@@ -319,7 +334,6 @@ final class LayoutEngine: ObservableObject {
     /// It has no windows; Apple's icons blink for a moment. An icon that
     /// still isn't in its spot moves the next time its app opens.
     private func apply(_ requests: [String: Placement], perch perchRequest: Placement?, in items: [MenuBarItem]) async {
-        let slots = StatusItemPositions.slots(for: items)
         let list = entries(for: items)
         var moves: [Move] = []
 
@@ -350,7 +364,10 @@ final class LayoutEngine: ObservableObject {
                 continue
             }
             if let current = slot.value, abs(current - target) < 0.01 { continue }
-            StatusItemPositions.write(target, for: slot)
+            guard await StatusItemPositions.write(target, for: slot, within: 1) else {
+                log.notice("couldn't save a spot for \(item.displayName, privacy: .public) in time")
+                continue
+            }
             log.notice("saved a new spot for \(item.displayName, privacy: .public)")
             guard !instant else { continue }
             let others = list.filter { $0.kind != .icon(key) }
@@ -423,7 +440,7 @@ final class LayoutEngine: ObservableObject {
             if case .icon(let other) = entry.kind { return preferences.priority(for: other) == .shown }
             return true // Perch's item, or the clock and Control Center
         }) else { return nil }
-        return Self.between(left: first > 0 ? others[first - 1].position : nil, right: others[first].position)
+        return Self.between(first > 0 ? others[first - 1] : nil, others[first])
     }
 
     private func anchorIndex(_ anchor: Anchor, in list: [Entry]) -> Int? {
@@ -443,8 +460,7 @@ final class LayoutEngine: ObservableObject {
         guard case .before(let anchor, _) = placement else { return nil }
         let list = entries(for: items).filter { $0.kind != moving }
         guard let index = anchorIndex(anchor, in: list) else { return nil }
-        let left = index > 0 ? list[index - 1].position : nil
-        return Self.between(left: left, right: list[index].position)
+        return Self.between(index > 0 ? list[index - 1] : nil, list[index])
     }
 
     // MARK: What fits
@@ -489,8 +505,7 @@ final class LayoutEngine: ObservableObject {
 
         // Perch's own item always stays shown: if the cut fell right of it, move it over.
         if let perchIndex = list.firstIndex(where: { $0.kind == .perch }), perchIndex < cut,
-           let position = Self.between(left: cut > 0 ? list[cut - 1].position : nil,
-                                       right: cut < list.count ? list[cut].position : nil) {
+           let position = Self.between(cut > 0 ? list[cut - 1] : nil, cut < list.count ? list[cut] : nil) {
             menuBar.movePerch(to: position)
             return true // Perch moved; the next scan places the divider.
         }
@@ -503,7 +518,7 @@ final class LayoutEngine: ObservableObject {
             let beforeRight = rightOfCut.map { divider.maxX < $0.x } ?? true
             if afterLeft && beforeRight { return false }
         }
-        guard let position = Self.between(left: leftOfCut?.position, right: rightOfCut?.position) else { return false }
+        guard let position = Self.between(leftOfCut, rightOfCut) else { return false }
         let shownCount = list[cut...].filter { $0.kind != .fixed }.count
         log.notice("moving the divider so \(shownCount, privacy: .public) icons show")
         menuBar.moveDivider(to: position)

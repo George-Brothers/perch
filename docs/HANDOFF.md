@@ -26,8 +26,10 @@
 20. `perch-arrange-drag`: drags across rows no longer get stuck (gesture on the rows, cancelled drags clear).
 21. `perch-arrange-still`: Arrange holds still once you use it (top and right edges pinned).
 22. `perch-instant-moves`: every Arrange move is instant: save positions, restart Control Center once, check each icon landed (else it waits, as in 19). Hiding checks priorities, not what's on screen, and puts the icon left of every icon meant to show.
+23. `perch-no-hang`: no Accessibility or settings I/O can block the main thread. Saved spots are read in the background with each scan; sandboxed apps' containers are never read (macOS asks permission and the read blocks until answered); their positions are guessed and moves hug the known neighbor. Drops start a pass at once.
 
 ## macOS 26 facts
+- Reading or writing another app's sandbox container (~/Library/Containers/<id>) triggers the "access data from other apps" prompt (kTCCServiceSystemPolicyAppData) and the call blocks until it's answered. Perch tells sandboxed apps by their code signature, never by touching the container.
 - Every status item window is owned by Control Center (layer 25); AX per app gives identity (AXExtrasMenuBar).
 - Preferred position defaults: smaller = further right. Seeded Perch 100, divider 101.
 - Frames are empty right after creating a status item; valid ~0.5 s later.

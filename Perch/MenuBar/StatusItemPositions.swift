@@ -23,11 +23,37 @@ enum StatusItemPositions {
         var value: Double?
     }
 
-    /// The settings an app reads: its sandbox container if it has one.
+    /// The settings an app reads: its sandbox container if it's sandboxed.
     static func domain(for bundleID: String) -> String {
-        let container = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Containers/\(bundleID)/Data/Library/Preferences/\(bundleID)")
-        return FileManager.default.fileExists(atPath: container.path + ".plist") ? container.path : bundleID
+        guard isSandboxed(bundleID) else { return bundleID }
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Containers/\(bundleID)/Data/Library/Preferences/\(bundleID)").path
+    }
+
+    private static let sandboxLock = NSLock()
+    private nonisolated(unsafe) static var sandboxed: [String: Bool] = [:]
+
+    /// From the app's own signature, never by looking inside its container:
+    /// macOS guards other apps' containers, and touching one makes it ask the
+    /// user for permission while the caller waits.
+    static func isSandboxed(_ bundleID: String) -> Bool {
+        sandboxLock.lock()
+        if let known = sandboxed[bundleID] { sandboxLock.unlock(); return known }
+        sandboxLock.unlock()
+        var result = false
+        if let url = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first?.bundleURL {
+            var code: SecStaticCode?
+            var info: CFDictionary?
+            if SecStaticCodeCreateWithPath(url as CFURL, [], &code) == errSecSuccess, let code,
+               SecCodeCopySigningInformation(code, SecCSFlags(rawValue: kSecCSSigningInformation), &info) == errSecSuccess,
+               let entitlements = (info as? [String: Any])?[kSecCodeInfoEntitlementsDict as String] as? [String: Any] {
+                result = entitlements["com.apple.security.app-sandbox"] as? Bool ?? false
+            }
+        }
+        sandboxLock.lock()
+        sandboxed[bundleID] = result
+        sandboxLock.unlock()
+        return result
     }
 
     /// Every saved icon position in a domain: autosave name → position.
@@ -47,7 +73,28 @@ enum StatusItemPositions {
         return result
     }
 
-    static func write(_ value: Double, for slot: Slot) {
+    /// Writes off the main thread. False if it didn't finish within `limit`
+    /// (macOS may be asking permission to change a sandboxed app's settings).
+    static func write(_ value: Double, for slot: Slot, within limit: TimeInterval) async -> Bool {
+        await withCheckedContinuation { continuation in
+            let lock = NSLock()
+            var resumed = false
+            let finish: (Bool) -> Void = { done in
+                lock.lock()
+                defer { lock.unlock() }
+                guard !resumed else { return }
+                resumed = true
+                continuation.resume(returning: done)
+            }
+            DispatchQueue.global(qos: .userInitiated).async {
+                write(value, for: slot)
+                finish(true)
+            }
+            DispatchQueue.global().asyncAfter(deadline: .now() + limit) { finish(false) }
+        }
+    }
+
+    private static func write(_ value: Double, for slot: Slot) {
         let id = slot.domain as CFString
         CFPreferencesSetValue((prefix + slot.name) as CFString, value as NSNumber, id,
                               kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
@@ -67,7 +114,10 @@ enum StatusItemPositions {
         let byApp = Dictionary(grouping: items.filter { $0.isInMenuBar && $0.bundleID != nil }, by: { $0.bundleID! })
         for (bundleID, appItems) in byApp {
             let domain = domain(for: bundleID)
-            let saved = saved(in: domain)
+            // A sandboxed app's saved spots are in its container, which Perch
+            // doesn't read (see `isSandboxed`). Its icons sit between their
+            // neighbors anyway, which is all the order needs.
+            let saved = domain == bundleID ? saved(in: domain) : [:]
             // The clock has no saved position; skip it.
             let icons = appItems
                 .filter { $0.identifier != "com.apple.menuextra.clock" }
