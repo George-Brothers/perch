@@ -11,6 +11,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var arrangePanel: PanelController!
     private var drawer: DrawerController!
     private let images = IconImages()
+    private let searchModel = SearchModel()
+    private var searchPanel: PanelController!
+    private var hotKey: HotKey!
     private var cancellables = Set<AnyCancellable>()
 
     static func main() {
@@ -76,7 +79,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let drawer = DrawerController(engine: engine, images: images, preferences: preferences)
         self.drawer = drawer
-        drawer.onOpenItem = { item in menuBar.openFromDrawer(item) }
+        drawer.onOpenItem = { item in menuBar.openTemporarily(item) }
         drawer.onOpenArrange = { [weak self] in self?.arrangePanel.open(anchor: menuBar.perchButton) }
         menuBar.toggleDrawer = { [weak self] in
             guard preferences.drawerEnabled, permissions.hasScreenRecording, permissions.hasAccessibility else {
@@ -86,6 +89,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.drawer.toggle(anchor: menuBar.perchButton)
             return true
         }
+
+        // Search: a shortcut (⌥⇧Space by default) finds and opens any icon.
+        let searchModel = self.searchModel
+        searchPanel = PanelController(model: engine) { [weak self] in
+            AnyView(SearchView(model: searchModel, engine: engine) { item in
+                self?.searchPanel.close()
+                if item.section == .hidden {
+                    menuBar.openTemporarily(item)
+                } else {
+                    ItemOpener.open(item)
+                }
+            })
+        }
+        searchPanel.onOpen = {
+            searchModel.reset()
+            engine.refresh()
+        }
+        let openSearch = { [weak self] in
+            guard let self, permissions.hasAccessibility else { return }
+            self.drawer.close()
+            self.arrangePanel.close()
+            self.searchPanel.toggle(anchor: menuBar.perchButton)
+        }
+        menuBar.openSearch = openSearch
+        menuBar.searchShortcutTitle = {
+            preferences.searchEnabled ? preferences.searchShortcut.displayString : nil
+        }
+        hotKey = HotKey(action: openSearch)
+        Publishers.CombineLatest(preferences.$searchEnabled, preferences.$searchShortcut)
+            .sink { [weak self] enabled, shortcut in
+                self?.hotKey.register(enabled ? shortcut : nil)
+            }
+            .store(in: &cancellables)
 
         menuBar.openSettings = { [weak self] pane in
             self?.arrangePanel.close()
