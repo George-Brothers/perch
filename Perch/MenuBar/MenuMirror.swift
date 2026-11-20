@@ -27,15 +27,20 @@ enum MenuMirror {
         let path: [Int]
         /// Titles along the same path, to check the real menu still matches.
         let titles: [String]
+        /// What tells apart each item in each menu along the path (title and
+        /// shortcut), as copied.
+        let levels: [[String]]
     }
 
     /// What a copied item needs to press the real one.
     private final class Pick: NSObject {
         let path: [Int]
         let titles: [String]
-        init(path: [Int], titles: [String]) {
+        let levels: [[String]]
+        init(path: [Int], titles: [String], levels: [[String]]) {
             self.path = path
             self.titles = titles
+            self.levels = levels
         }
     }
 
@@ -95,7 +100,7 @@ enum MenuMirror {
 
         for _ in 0..<30 {
             if let menu = AX.elements(element, kAXChildrenAttribute).first(where: { AX.string($0, kAXRoleAttribute) == "AXMenu" }) {
-                let entries = read(menu, path: [], titles: [])
+                let entries = read(menu, path: [], titles: [], levels: [])
                 _ = AXUIElementPerformAction(menu, kAXCancelAction as CFString)
                 return .menu(entries)
             }
@@ -115,8 +120,10 @@ enum MenuMirror {
         return .nothing
     }
 
-    private nonisolated static func read(_ menu: AXUIElement, path: [Int], titles: [String]) -> [Entry] {
-        AX.elements(menu, kAXChildrenAttribute).enumerated().map { index, element in
+    private nonisolated static func read(_ menu: AXUIElement, path: [Int], titles: [String], levels: [[String]]) -> [Entry] {
+        let children = AX.elements(menu, kAXChildrenAttribute)
+        let levels = levels + [children.map(signature)]
+        return children.enumerated().map { index, element in
             let title = AX.string(element, kAXTitleAttribute) ?? ""
             let enabled = AX.raw(element, kAXEnabledAttribute) as? Bool ?? true
             let submenu = AX.elements(element, kAXChildrenAttribute).first { AX.string($0, kAXRoleAttribute) == "AXMenu" }
@@ -132,9 +139,10 @@ enum MenuMirror {
                 key: AX.string(element, "AXMenuItemCmdChar") ?? "",
                 modifiers: modifiers,
                 isSeparator: title.isEmpty && !enabled && submenu == nil,
-                children: submenu.map { read($0, path: path + [index], titles: titles + [title]) } ?? [],
+                children: submenu.map { read($0, path: path + [index], titles: titles + [title], levels: levels) } ?? [],
                 path: path + [index],
-                titles: titles + [title]
+                titles: titles + [title],
+                levels: levels
             )
         }
     }
@@ -168,7 +176,7 @@ enum MenuMirror {
             if entry.children.isEmpty {
                 menuItem.target = handler
                 menuItem.action = #selector(Handler.pick(_:))
-                menuItem.representedObject = Pick(path: entry.path, titles: entry.titles)
+                menuItem.representedObject = Pick(path: entry.path, titles: entry.titles, levels: entry.levels)
             } else {
                 let submenu = NSMenu(title: entry.title)
                 add(entry.children, to: submenu, handler: handler)
@@ -190,15 +198,24 @@ enum MenuMirror {
             guard let pick = sender.representedObject as? Pick else { return }
             picked = true
             let element = item.element
-            let path = pick.path, titles = pick.titles
+            let path = pick.path, titles = pick.titles, levels = pick.levels
             Task.detached(priority: .userInitiated) {
-                MenuMirror.press(path: path, titles: titles, in: element)
+                MenuMirror.press(path: path, titles: titles, levels: levels, in: element)
             }
         }
     }
 
     /// Opens the real menu off screen again and presses the item at `path`.
-    private nonisolated static func press(path: [Int], titles: [String], in element: AXUIElement) {
+    /// An item's title and shortcut: two items can share a title ("Disconnect")
+    /// but not usually both. A checkmark isn't part of it; it flips.
+    private nonisolated static func signature(_ element: AXUIElement) -> String {
+        let title = AX.string(element, kAXTitleAttribute) ?? ""
+        let key = AX.string(element, "AXMenuItemCmdChar") ?? ""
+        let modifiers = AX.raw(element, "AXMenuItemCmdModifiers") as? Int ?? 0
+        return "\(title)\u{1F}\(key)\u{1F}\(key.isEmpty ? 0 : modifiers)"
+    }
+
+    private nonisolated static func press(path: [Int], titles: [String], levels: [[String]], in element: AXUIElement) {
         AXUIElementSetMessagingTimeout(element, 0.3)
         _ = AXUIElementPerformAction(element, kAXPressAction as CFString)
         var menu: AXUIElement?
@@ -213,23 +230,30 @@ enum MenuMirror {
             let items = AX.elements(current, kAXChildrenAttribute)
             let isLast = depth == path.count - 1
             // The menu may have changed since it was copied (an app can
-            // reorder its submenus). Every step must still have the title it
-            // had; if it moved, take the one item with that title, never a guess.
+            // reorder its submenus, or list disks that come and go). Take the
+            // one item with the title and shortcut it had, if that's unique
+            // both now and in the copy (if the one you picked is gone, its twin
+            // isn't it). With no title, or twins, only if this menu is exactly
+            // as copied. Never a guess.
             let title = depth < titles.count ? titles[depth] : ""
-            var found = index < items.count ? items[index] : nil
-            if let candidate = found, (AX.string(candidate, kAXTitleAttribute) ?? "") != title {
-                found = nil
-            }
-            if found == nil, !title.isEmpty {
-                let matches = items.filter { AX.string($0, kAXTitleAttribute) == title }
-                found = matches.count == 1 ? matches[0] : nil
+            let copied = depth < levels.count ? levels[depth] : []
+            let picked = index < copied.count ? copied[index] : nil
+            let now = items.map(signature)
+            let matches = items.indices.filter { now[$0] == picked }
+            var found: AXUIElement?
+            if !title.isEmpty, let picked, matches.count == 1, copied.filter({ $0 == picked }).count == 1 {
+                found = items[matches[0]]
+            } else if now == copied, index < items.count {
+                found = items[index]
             }
             guard let next = found else { break }
             if isLast {
                 AXUIElementSetMessagingTimeout(next, 0.5)
                 let result = AXUIElementPerformAction(next, kAXPressAction as CFString)
                 log.notice("picked a menu item (\(result.rawValue, privacy: .public))")
-                return
+                if result == .success { return }
+                // Turned off since it was copied, say: don't leave the menu open off screen.
+                break
             }
             guard let submenu = AX.elements(next, kAXChildrenAttribute).first(where: { AX.string($0, kAXRoleAttribute) == "AXMenu" })
             else { break }

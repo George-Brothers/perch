@@ -97,15 +97,25 @@ final class MenuBarController: NSObject, ObservableObject {
             if hasAccessibility, waitsForAccessibility {
                 waitsForAccessibility = false
                 Task { await firstHide() }
+            } else if !hasAccessibility {
+                // Perch can no longer see the icons or open hidden ones: show
+                // them all, and hide again once the permission is back.
+                waitsForAccessibility = true
+                hasPlaced = false
+                reveal()
             }
         }
     }
 
     /// Places the divider from a real look at the bar, before Perch first
-    /// hides anything (set by the layout engine).
-    var placeFirst: (() async -> Void)?
+    /// hides anything (set by the layout engine). False if it couldn't look
+    /// yet (a menu was open, say).
+    var placeFirst: (() async -> Bool)?
     /// Perch started without Accessibility, so it hasn't hidden anything yet.
     private var waitsForAccessibility = false
+    /// The divider has been placed from a real look at the bar, so hiding is safe.
+    private var hasPlaced = false
+    private var isFirstHiding = false
 
     /// What's in the bar for Perch right now.
     private var barItem: PerchBarItem { hasAccessibility ? preferences.barItem : .icon }
@@ -144,6 +154,14 @@ final class MenuBarController: NSObject, ObservableObject {
     func collapse() {
         stopMenuWatch()
         isTemporaryReveal = false
+        // Every caller, not just the bird: without Accessibility, or before the
+        // divider has a real spot, hiding could hide the icons you want.
+        guard hasAccessibility, hasPlaced else {
+            log.notice("not hiding: Perch hasn't placed the divider with Accessibility yet")
+            visibility = .revealed
+            apply()
+            return
+        }
         guard perchIsRightOfDivider() else {
             // The bird ended up on the hidden side, so hiding would hide Perch
             // itself. Put Perch back next to Control Center, once. If macOS
@@ -513,8 +531,18 @@ final class MenuBarController: NSObject, ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in self?.waitForPlacement() }
     }
 
+    /// Hides only once the divider is where a real look at the bar puts it:
+    /// at a stale spot, icons you want to see could vanish.
     private func firstHide() async {
-        await placeFirst?()
+        guard !isFirstHiding else { return }
+        isFirstHiding = true
+        defer { isFirstHiding = false }
+        while await placeFirst?() == false {
+            guard hasAccessibility else { return }
+            try? await Task.sleep(for: .seconds(1))
+        }
+        guard hasAccessibility else { return }
+        hasPlaced = true
         collapse()
         onReady?()
     }
@@ -586,7 +614,9 @@ final class MenuBarController: NSObject, ObservableObject {
     /// (only right after launch), a click hides the extras instead.
     private func menuToggle() {
         if visibility.isRevealed {
-            collapse()
+            // Without Accessibility, or before the divider has a real spot,
+            // hiding could hide the icons you want; Arrange explains instead.
+            if hasAccessibility && hasPlaced { collapse() } else { openArrange?() }
         } else if toggleDrawer?() != true {
             openArrange?()
         }

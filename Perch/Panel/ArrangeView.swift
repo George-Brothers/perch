@@ -303,11 +303,23 @@ struct ArrangeBar: View {
         // Moves waiting for Arrange to close: show the order you set.
         if let queued = engine.queuedBar {
             let present = Set(byX.filter(\.isInMenuBar).map(\.key))
-            let bar = queued.compactMap { spot -> Slot? in
+            var bar = queued.compactMap { spot -> Slot? in
                 switch spot {
                 case .icon(let key): return present.contains(key) ? .icon(key) : nil
                 case .perch: return engine.perchMinX == nil ? nil : .perch
                 }
+            }
+            // Icons that appeared since stay where they are until you move one.
+            func minX(_ slot: Slot) -> CGFloat? {
+                switch slot {
+                case .icon(let key): return byX.first { $0.key == key }?.frame.minX
+                case .perch: return engine.perchMinX
+                }
+            }
+            for item in byX where item.isInMenuBar && !engine.queuedFrom.contains(item.key)
+                && preferences.priority(for: item.key) == .shown {
+                let index = bar.firstIndex { (minX($0) ?? -.infinity) > item.frame.minX } ?? bar.count
+                bar.insert(.icon(item.key), at: index)
             }
             let hidden = engine.inHiddenOrder(byX.filter { $0.isInMenuBar && !bar.contains(.icon($0.key)) })
                 .map { Slot.icon($0.key) }
@@ -358,7 +370,7 @@ struct ArrangeBar: View {
             pending = nil
         case .icon(let key):
             guard let item = item(key) else { return }
-            arrangeLog.notice("dropped \(item.displayName, privacy: .public) in \(row.title, privacy: .public)")
+            arrangeLog.debug("dropped \(item.displayName, privacy: .public) in \(row.title, privacy: .public)")
             // Accepted: Arrange draws the engine's order from here. Refused: back to the bar.
             _ = engine.place(item, .before(anchor, shown: shown))
             pending = nil
