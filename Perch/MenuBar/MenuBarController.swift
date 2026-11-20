@@ -8,7 +8,7 @@ import os
 ///
 ///     [hidden icons] │ [shown icons] 🐦 [Control Center, clock]
 ///
-/// The 🐦 is optional (Settings → General): it can be a thin line, or nothing
+/// The 🐦 is optional (in Settings): it can be a thin line, or nothing
 /// at all. Clicking empty menu bar space does the same as clicking it.
 ///
 /// macOS has no API for hiding another app's icon. Instead the │ divider is a
@@ -73,7 +73,6 @@ final class MenuBarController: NSObject, ObservableObject {
 
     @Published private(set) var visibility: Visibility = .revealed
 
-    var openSettings: ((SettingsPane?) -> Void)?
     var openArrange: (() -> Void)?
     /// Called once Perch's items are placed, and again after a reset.
     var onReady: (() -> Void)?

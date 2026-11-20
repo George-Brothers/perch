@@ -1,71 +1,36 @@
 import AppKit
 import SwiftUI
 
-enum SettingsPane: String, CaseIterable, Identifiable {
-    case general
-    case features
-    case icons
-    case about
-
-    var id: Self { self }
-
-    var title: String {
-        switch self {
-        case .general: "General"
-        case .features: "Features"
-        case .icons: "Icons"
-        case .about: "About"
-        }
-    }
-
-    var symbol: String {
-        switch self {
-        case .general: "gearshape"
-        case .features: "switch.2"
-        case .icons: "menubar.rectangle"
-        case .about: "info.circle"
-        }
-    }
-}
-
-@MainActor
-final class SettingsNavigation: ObservableObject {
-    @Published var pane: SettingsPane? = .general
-}
-
 /// Builds the Settings window on first use and reuses it after that.
 @MainActor
 final class SettingsWindowController {
     static let title = "Perch Settings"
-    private let navigation = SettingsNavigation()
-    private let makeContent: (SettingsNavigation) -> AnyView
+    private let makeContent: () -> AnyView
     private var window: NSWindow?
 
-    init(makeContent: @escaping (SettingsNavigation) -> AnyView) {
+    init(makeContent: @escaping () -> AnyView) {
         self.makeContent = makeContent
     }
 
-    func show(pane: SettingsPane?) {
-        if let pane { navigation.pane = pane }
-
+    func show() {
         if window == nil {
-            let hosting = NSHostingController(rootView: makeContent(navigation))
+            let hosting = NSHostingController(rootView: makeContent())
+            hosting.sizingOptions = [.preferredContentSize]
             let window = NSWindow(contentViewController: hosting)
             window.title = Self.title
-            window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
-            window.toolbarStyle = .unified
+            window.styleMask = [.titled, .closable]
+            window.titleVisibility = .hidden
             window.isReleasedWhenClosed = false
-            window.setContentSize(NSSize(width: 680, height: 500))
-            window.contentMinSize = NSSize(width: 600, height: 420)
             window.center()
-            window.setFrameAutosaveName("PerchSettings")
+            window.setFrameAutosaveName("PerchSettingsWindow")
             self.window = window
         } else if let window, !window.isVisible {
-            // Fresh content each time Settings opens, so every pane reloads
-            // (permissions, icons, an unapplied spacing edit).
-            let frame = window.frame
-            window.contentViewController = NSHostingController(rootView: makeContent(navigation))
-            window.setFrame(frame, display: false)
+            // Fresh content each time Settings opens (permissions, an unapplied spacing edit).
+            let origin = window.frame.origin
+            let hosting = NSHostingController(rootView: makeContent())
+            hosting.sizingOptions = [.preferredContentSize]
+            window.contentViewController = hosting
+            window.setFrameOrigin(origin)
         }
 
         // Perch has no Dock icon, so macOS won't always bring it forward on its own.

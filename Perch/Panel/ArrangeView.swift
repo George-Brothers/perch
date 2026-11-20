@@ -11,7 +11,7 @@ private let arrangeLog = Logger(subsystem: "com.georgebrothers.perch", category:
 /// - **Turned off**: icons turned off in System Settings → Menu Bar.
 ///
 /// Drag an icon to any spot in the bar or Hidden and Perch moves the real one there.
-/// Used in the Arrange panel and in Settings → Icons.
+/// Used in the Arrange panel.
 struct ArrangeBar: View {
     @ObservedObject var engine: LayoutEngine
     @ObservedObject var preferences: Preferences
