@@ -5,7 +5,7 @@ struct SettingsView: View {
     @ObservedObject var preferences: Preferences
     @ObservedObject var permissions: Permissions
     @ObservedObject var engine: LayoutEngine
-    let onShowWelcome: () -> Void
+    let onShowGuide: () -> Void
 
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
     @State private var needsApproval = LaunchAtLogin.needsApproval
@@ -83,7 +83,7 @@ struct SettingsView: View {
                 Text("Perch \(version)")
                     .foregroundStyle(.tertiary)
                 Spacer()
-                Button("Guide", action: onShowWelcome)
+                Button("Guide", action: onShowGuide)
                     .buttonStyle(.link)
                     .foregroundStyle(.secondary)
                     .padding(.trailing, 14)
