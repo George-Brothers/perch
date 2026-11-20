@@ -565,14 +565,18 @@ final class LayoutEngine: ObservableObject {
             list[index].isGuess = true
             var left = list[..<index].last(where: { $0.position != nil })?.position
             var right = list[(index + 1)...].first(where: { $0.position != nil })?.position
-            // Narrow it with what earlier moves showed, while that still fits.
+            // Narrow it with what earlier moves showed, while that still fits
+            // the known neighbors (a guessed one beside it proves nothing).
             if case .icon(let key) = list[index].kind, let learned = learnedBounds[key] {
-                let high = [left, learned.high].compactMap { $0 }.min()
-                let low = [right, learned.low].compactMap { $0 }.max()
+                let knownLeft = list[..<index].last(where: { !$0.isGuess && $0.position != nil })?.position
+                let knownRight = list[(index + 1)...].first(where: { !$0.isGuess && $0.position != nil })?.position
+                let high = [knownLeft, learned.high].compactMap { $0 }.min()
+                let low = [knownRight, learned.low].compactMap { $0 }.max()
                 if let high, let low, high <= low {
                     learnedBounds[key] = nil
                 } else {
-                    left = high
+                    // Inside the bounds, and below a guessed neighbor's guess when that leaves room.
+                    if let l = left, l > (low ?? -.infinity) { left = min(l, high ?? l) } else { left = high }
                     right = low
                 }
             }
