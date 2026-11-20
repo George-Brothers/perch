@@ -27,6 +27,7 @@
 21. `perch-arrange-still`: Arrange holds still once you use it (top and right edges pinned).
 22. `perch-instant-moves`: every Arrange move is instant: save positions, restart Control Center once, check each icon landed (else it waits, as in 19). Hiding checks priorities, not what's on screen, and puts the icon left of every icon meant to show.
 23. `perch-no-hang`: no Accessibility or settings I/O can block the main thread. Saved spots are read in the background with each scan; sandboxed apps' containers are never read (macOS asks permission and the read blocks until answered); their positions are guessed and moves hug the known neighbor. Drops start a pass at once.
+24. `perch-arrange-steady`: after a move Perch scans until two scans agree before publishing (a scan mid-move filed hidden icons under Turned off); drags allowed mid-move; Arrange logs every drag, drop and skipped move (category "arrange").
 
 ## macOS 26 facts
 - Reading or writing another app's sandbox container (~/Library/Containers/<id>) triggers the "access data from other apps" prompt (kTCCServiceSystemPolicyAppData) and the call blocks until it's answered. Perch tells sandboxed apps by their code signature, never by touching the container.

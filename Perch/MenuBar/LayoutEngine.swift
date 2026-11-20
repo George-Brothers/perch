@@ -75,13 +75,18 @@ final class LayoutEngine: ObservableObject {
 
     /// Rescans so the Arrange list is current. Cheap; runs when the list opens.
     func refresh() {
+        // A pass in progress publishes its own scan once the bar has settled.
+        guard !isArranging else { return }
         Task { await scan() }
     }
 
     /// Rescans and returns the icons, for callers that need them right away.
     func rescan() async -> [MenuBarItem] {
-        await scan()
+        isArranging ? items : await scan()
     }
+
+    /// Moves asked for in Arrange that no pass has picked up yet.
+    var hasQueuedMoves: Bool { !placements.isEmpty || perchPlacement != nil }
 
     /// Asks for an arrange pass after `delay`. Repeated requests collapse into one.
     func scheduleArrange(after delay: TimeInterval = 0.4) {
@@ -99,7 +104,7 @@ final class LayoutEngine: ObservableObject {
     private var slots: [String: StatusItemPositions.Slot] = [:]
 
     @discardableResult
-    private func scan() async -> [MenuBarItem] {
+    private func scan(publish: Bool = true) async -> [MenuBarItem] {
         permissions.refresh()
         guard permissions.hasAccessibility else {
             items = []
@@ -109,7 +114,7 @@ final class LayoutEngine: ObservableObject {
         // Reading saved spots talks to other processes; never on the main thread.
         slots = await Task.detached(priority: .userInitiated) { StatusItemPositions.slots(for: found) }.value
         let dividerMidX = menuBar.dividerFrame()?.midX
-        items = found.map { item in
+        let classified = found.map { item in
             var item = item
             if !item.isInMenuBar {
                 item.section = .notShowing
@@ -120,6 +125,8 @@ final class LayoutEngine: ObservableObject {
             }
             return item
         }
+        guard publish else { return classified }
+        items = classified
         perchMinX = menuBar.perchFrame()?.minX
         perchWidth = menuBar.perchFrame()?.width
         hasScanned = true
@@ -178,6 +185,7 @@ final class LayoutEngine: ObservableObject {
         }
         // Recreating the divider would close an open menu; wait for it.
         if MenuBarGeometry.isMenuOpen() || menuBar.isTemporaryReveal {
+            log.notice("waiting: a menu is open")
             deferOrGiveUp()
             return
         }
@@ -187,7 +195,8 @@ final class LayoutEngine: ObservableObject {
             isArranging = false
             if arrangeAgain {
                 arrangeAgain = false
-                scheduleArrange()
+                // Another drop came in during this pass: do it right away.
+                scheduleArrange(after: hasQueuedMoves ? 0.02 : 0.4)
             }
         }
 
@@ -202,10 +211,29 @@ final class LayoutEngine: ObservableObject {
         }
         if placeDivider(in: current) {
             await menuBar.settle()
-            // The other icons' frames catch up a little after the divider's.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.refresh() }
+            await settledScan()
+        } else {
+            await scan()
         }
-        await scan()
+    }
+
+    /// Scans until two scans in a row agree (up to about 1.5 s), then
+    /// publishes. Right after a move macOS is still laying out the bar, and a
+    /// scan then can see hidden icons nowhere and file them as turned off.
+    @discardableResult
+    private func settledScan() async -> [MenuBarItem] {
+        var previous = await scan(publish: false)
+        for _ in 0..<15 {
+            try? await Task.sleep(for: .milliseconds(100))
+            let next = await scan(publish: false)
+            if Self.layout(of: next) == Self.layout(of: previous) { break }
+            previous = next
+        }
+        return await scan()
+    }
+
+    private static func layout(of items: [MenuBarItem]) -> [String] {
+        items.map { "\($0.key) \($0.section) \(Int($0.frame.minX))" }
     }
 
     // MARK: Positions
@@ -351,7 +379,10 @@ final class LayoutEngine: ObservableObject {
             let target: Double?
             if instant {
                 // The divider does it. Only an earlier move still waiting needs undoing.
-                guard let waiting = pendingMoves[key] else { continue }
+                guard let waiting = pendingMoves[key] else {
+                    log.notice("\(item.displayName, privacy: .public): only the divider moves")
+                    continue
+                }
                 pendingMoves[key] = nil
                 target = waiting.previous ?? list[index].position
             } else if shown {
@@ -363,7 +394,10 @@ final class LayoutEngine: ObservableObject {
                 log.notice("can't save a spot for \(item.displayName, privacy: .public)")
                 continue
             }
-            if let current = slot.value, abs(current - target) < 0.01 { continue }
+            if let current = slot.value, abs(current - target) < 0.01 {
+                log.notice("\(item.displayName, privacy: .public) is already there")
+                continue
+            }
             guard await StatusItemPositions.write(target, for: slot, within: 1) else {
                 log.notice("couldn't save a spot for \(item.displayName, privacy: .public) in time")
                 continue
@@ -388,7 +422,7 @@ final class LayoutEngine: ObservableObject {
 
         await AppRestarter.restartControlCenter()
         await menuBar.settle()
-        let after = await scan()
+        let after = await settledScan()
         // Control Center put every icon at its saved spot, including any
         // earlier moves that were waiting.
         let landed = entries(for: after)
