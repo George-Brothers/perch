@@ -15,6 +15,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var searchPanel: PanelController!
     private var hotKey: HotKey!
     private var cancellables = Set<AnyCancellable>()
+    private var openSearchAction: (() -> Void)?
+
+    /// For App Intents (Spotlight and Shortcuts), which run inside Perch.
+    private(set) static weak var shared: AppDelegate?
 
     static func main() {
         let app = NSApplication.shared
@@ -27,6 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        Self.shared = self
         let images = self.images
         let preferences = Preferences.shared
         let permissions = Permissions.shared
@@ -113,6 +118,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.searchPanel.toggle(anchor: menuBar.perchButton)
         }
         menuBar.openSearch = openSearch
+        openSearchAction = openSearch
         menuBar.searchShortcutTitle = {
             preferences.searchEnabled ? preferences.searchShortcut.displayString : nil
         }
@@ -139,6 +145,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.arrangePanel.open(anchor: menuBar.perchButton)
             }
         }
+    }
+
+    // MARK: - Actions for Spotlight and Shortcuts
+
+    func showHiddenIcons() {
+        if menuBar.toggleDrawer?() == true { return }
+        menuBar.reveal()
+    }
+
+    func searchIcons() {
+        openSearchAction?()
+    }
+
+    func icons() async -> [MenuBarItem] {
+        await engine.rescan().filter { $0.section != .notShowing }
+    }
+
+    /// Opens the icon with this key. Returns false if it's gone.
+    func openIcon(key: String) async -> Bool {
+        guard let item = await icons().first(where: { $0.key == key }) else { return false }
+        if item.section == .hidden {
+            menuBar.openTemporarily(item)
+        } else {
+            ItemOpener.open(item)
+        }
+        return true
     }
 
     /// Opening Perch again (from Finder, Spotlight or the Dock) shows Settings,
