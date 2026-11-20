@@ -16,7 +16,17 @@ struct SetupView: View {
         case welcome, access, choices, ready
     }
 
-    @State private var step: Step = .welcome
+    @State private var step: Step
+
+    /// Setup that comes back after you allow Accessibility picks up there.
+    init(permissions: Permissions, preferences: Preferences, startAt: Step = .welcome,
+         onOpenGuide: @escaping () -> Void, onDone: @escaping () -> Void) {
+        self.permissions = permissions
+        self.preferences = preferences
+        self.onOpenGuide = onOpenGuide
+        self.onDone = onDone
+        _step = State(initialValue: startAt)
+    }
 
     var body: some View {
         VStack(spacing: 0) {

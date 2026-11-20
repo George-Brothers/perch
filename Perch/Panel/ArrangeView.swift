@@ -59,8 +59,6 @@ struct ArrangeBar: View {
     @State private var frames: [Slot: CGRect] = [:]
     @State private var rowFrames: [Row: CGRect] = [:]
     @State private var stripWidth: CGFloat = 0
-    /// The rows as you dropped them, shown until Perch has moved the real icon.
-    @State private var pending: [Row: [Slot]]?
     /// This press started on nothing; logged once.
     @State private var ignoredDrag = false
 
@@ -82,11 +80,6 @@ struct ArrangeBar: View {
                         .padding(.horizontal, 6)
                 }
             }
-            // Keep showing your drop until every move is done and the bar has settled.
-            .onChange(of: engine.isArranging) { _, arranging in
-                if !arranging && !engine.hasQueuedMoves { pending = nil }
-            }
-            .onChange(of: barSignature) { _, _ in if !engine.isArranging && !engine.hasQueuedMoves { pending = nil } }
         }
     }
 
@@ -164,9 +157,9 @@ struct ArrangeBar: View {
             .frame(width: active ? 3 : 2, height: min(20, height - 8))
             .frame(width: 14, height: height)
             .contentShape(Rectangle())
-            .onHover { inside in
-                if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
-            }
+            // Not NSCursor push/pop: Arrange can close with the pointer
+            // still on the line, and the pop would never come.
+            .pointerStyle(.columnResize)
             .background(GeometryReader { geometry in
                 Color.clear.preference(key: SlotFrames.self, value: [.split: geometry.frame(in: .named("arrange"))])
             })
@@ -290,10 +283,10 @@ struct ArrangeBar: View {
         return drag.location.x < bar.minX - 7 ? .hidden : .bar
     }
 
-    /// What each side shows: the live layout, the layout you dropped while Perch
-    /// moves the icon, or the layout you're dragging into.
+    /// What each side shows: the live layout (which already includes any move
+    /// you dropped), or the layout you're dragging into.
     private var rows: [Row: [Slot]] {
-        guard let drag else { return pending ?? liveRows }
+        guard let drag else { return liveRows }
         if drag.slot == .split { return splitRows(drag) }
         var result = drag.original.mapValues { $0.filter { $0 != drag.slot } }
         guard let row = targetRow else { return drag.original }
@@ -382,7 +375,6 @@ struct ArrangeBar: View {
         case .perch?: anchor = .perch
         case .split?, nil: anchor = shown ? .end : .divider
         }
-        pending = final
         switch drag.slot {
         case .perch:
             _ = engine.placePerch(.before(anchor, shown: true))
@@ -394,7 +386,6 @@ struct ArrangeBar: View {
         case .split:
             break
         }
-        pending = nil
     }
 
     /// The line moved: the icons it passed change sides, one move each, so
@@ -449,11 +440,6 @@ struct ArrangeBar: View {
 
     private func item(_ key: String) -> MenuBarItem? {
         engine.items.first { $0.key == key }
-    }
-
-    /// Changes whenever an icon appears, goes or moves.
-    private var barSignature: [String] {
-        icons.map { "\($0.key)@\(Int($0.frame.minX))" }
     }
 }
 

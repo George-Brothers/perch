@@ -214,9 +214,14 @@ struct DrawerView: View {
     private func priorityMenu(for item: MenuBarItem) -> some View {
         Text(item.displayName)
         Divider()
-        Button("Show in Menu Bar") {
-            onClose()
-            engine.place(item, .before(.divider, shown: true))
+        if preferences.priority(for: item.key) == .hidden {
+            Button("Show in Menu Bar") {
+                onClose()
+                engine.place(item, .before(.divider, shown: true))
+            }
+        } else {
+            // Already set to show; it's here because the menu bar is full.
+            Text("No room in the menu bar")
         }
         Divider()
         Button("Arrange Icons…", action: onArrange)

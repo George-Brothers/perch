@@ -212,10 +212,17 @@ enum AppRestarter {
                 try? await Task.sleep(for: .seconds(10.5 - Date().timeIntervalSince(started)))
                 continue
             }
-            // That wait can be long; don't close a menu you opened meanwhile,
-            // or restart while the screen is locked.
-            if MenuBarGeometry.isMenuOpen() || screenIsLocked {
-                if !saidWaiting { log.notice("restart waiting: a menu is open or the screen is locked") }
+            // That wait can be long; don't restart while the screen is
+            // locked (wait for the unlock, which can be overnight), or close
+            // a menu you opened meanwhile (menus close soon; check twice a second).
+            if screenIsLocked {
+                log.notice("restart waiting for the screen to unlock")
+                _ = await DistributedNotificationCenter.default()
+                    .notifications(named: .init("com.apple.screenIsUnlocked")).first { _ in true }
+                continue
+            }
+            if MenuBarGeometry.isMenuOpen() {
+                if !saidWaiting { log.notice("restart waiting: a menu is open") }
                 saidWaiting = true
                 try? await Task.sleep(for: .milliseconds(500))
                 continue

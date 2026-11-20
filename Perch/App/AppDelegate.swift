@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var drawer: DrawerController!
     private var guide: HostedWindow!
     private var setup: HostedWindow!
+    private var setupStart: SetupView.Step = .welcome
     private let images = IconImages()
     private var spotlight: SpotlightIndex!
     private var cancellables = Set<AnyCancellable>()
@@ -54,7 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 overBar: { self?.overBarGeometry() },
                 onOpenItem: { item in
                     self?.arrangePanel.close()
-                    Task { if await self?.open(item) == false { NSSound.beep() } }
+                    Task { await self?.open(item) }
                 },
                 onOpenSettings: {
                     self?.arrangePanel.close()
@@ -178,6 +179,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             AnyView(SetupView(
                 permissions: permissions,
                 preferences: preferences,
+                startAt: self?.setupStart ?? .welcome,
                 onOpenGuide: { self?.showGuide() },
                 onDone: close
             ))
@@ -193,8 +195,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .dropFirst()
             .filter { $0 }
             .sink { [weak self] _ in
-                // Back from System Settings with Accessibility on: bring setup forward.
+                // Back from System Settings with Accessibility on: bring setup
+                // forward, at the step that asked (if it was closed meanwhile).
                 guard !UserDefaults.standard.bool(forKey: Self.setupDoneKey) else { return }
+                self?.setupStart = .access
                 self?.showSetup()
             }
             .store(in: &cancellables)
@@ -230,7 +234,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if menuBar.toggleDrawer?() != true { showArrange() }
     }
 
-    /// Opens Arrange (from Spotlight); running it again leaves it open.
     /// Where Arrange goes over the menu bar: from the left edge (or the notch)
     /// to just left of the clock and Control Center, which stay visible.
     private func overBarGeometry() -> OverBarGeometry? {
@@ -247,6 +250,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
+    /// Opens Arrange (from Spotlight); running it again leaves it open.
     func showArrange() {
         guard !arrangePanel.isOpen else { return }
         closePanels(except: .arrange)
@@ -261,22 +265,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func openIcon(key: String) async -> OpenResult {
         guard Permissions.shared.hasAccessibility else { return .noPermission }
         guard let item = await icons().first(where: { $0.key == key }) else { return .gone }
-        return await open(item) ? .opened : .busy
+        await open(item)
+        return .opened
     }
 
-    enum OpenResult { case opened, gone, busy, noPermission }
+    enum OpenResult { case opened, gone, noPermission }
 
     /// Opens an icon's menu. A hidden icon opens right where you are (under
     /// Perch's bar, or under the menu bar), without coming into the menu bar.
     /// Only if that fails does it come out just until its menu closes.
-    @discardableResult
-    private func open(_ item: MenuBarItem, at point: NSPoint? = nil) async -> Bool {
+    private func open(_ item: MenuBarItem, at point: NSPoint? = nil) async {
         guard item.section == .hidden else {
             ItemOpener.open(item)
-            return true
+            return
         }
-        if await MenuMirror.open(item, at: point ?? defaultMenuPoint()) != .failed { return true }
-        return menuBar.openTemporarily(item)
+        if await MenuMirror.open(item, at: point ?? defaultMenuPoint()) != .failed { return }
+        menuBar.openTemporarily(item)
     }
 
     /// Opens an icon clicked in Perch's bar. True when Perch's bar should

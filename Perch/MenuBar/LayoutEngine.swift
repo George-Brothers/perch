@@ -28,7 +28,6 @@ final class LayoutEngine: ObservableObject {
     /// How many times in a row a pass waited for a menu or the mouse.
     private var deferrals = 0
     /// The display layout at the last display-change trigger.
-    private var lastScreenFrames: [CGRect] = NSScreen.screens.map(\.frame)
 
 
     init(preferences: Preferences, permissions: Permissions, menuBar: MenuBarController) {
@@ -79,6 +78,9 @@ final class LayoutEngine: ObservableObject {
     func hold(_ on: Bool, for holder: Holder) {
         let wasHolding = holdsMoves
         if on { holders.insert(holder) } else { holders.remove(holder) }
+        // You've seen it. (A pass that runs after Arrange closes can still
+        // leave one for next time.)
+        if !on, holder == .arrange { notice = nil }
         if wasHolding, !holdsMoves, queued != nil { scheduleArrange(after: 0.05) }
     }
     private var holders: Set<Holder> = []
@@ -889,10 +891,6 @@ final class LayoutEngine: ObservableObject {
 
     // MARK: - Triggers
 
-    private func retry(after delay: TimeInterval) {
-        scheduleArrange(after: delay)
-    }
-
     private func observeTriggers() {
         // The first hide waits for a real pass, so it hides only what doesn't fit.
         menuBar.placeFirst = { [weak self] in await self?.arrange() ?? true }
@@ -922,29 +920,21 @@ final class LayoutEngine: ObservableObject {
             forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self else { return }
-                // This fires for small things too (the Dock, say).
-                let frames = NSScreen.screens.map(\.frame)
-                if frames != self.lastScreenFrames {
-                    self.lastScreenFrames = frames
-                    self.retry(after: 1.5)
-                } else {
-                    self.scheduleArrange(after: 1.5)
-                }
+                self?.scheduleArrange(after: 1.5)
             }
         })
 
         observers.append(DistributedNotificationCenter.default().addObserver(
             forName: NSNotification.Name("com.apple.screenIsUnlocked"), object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.retry(after: 1.5) }
+            MainActor.assumeIsolated { self?.scheduleArrange(after: 1.5) }
         })
 
         let workspace = NSWorkspace.shared.notificationCenter
         observers.append(workspace.addObserver(
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.retry(after: 3) }
+            MainActor.assumeIsolated { self?.scheduleArrange(after: 3) }
         })
         // Icons come and go with their apps, which changes what fits.
         for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {

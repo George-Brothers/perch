@@ -105,7 +105,7 @@ final class Preferences: ObservableObject {
     @Published var barItem: PerchBarItem {
         didSet { defaults.set(barItem.rawValue, forKey: Key.barItem) }
     }
-    /// Priority per icon, keyed by `MenuBarItem.key`. Icons not listed are `.auto`.
+    /// Priority per icon, keyed by `MenuBarItem.key`. Icons not listed are `.shown`.
     @Published private(set) var priorities: [String: IconPriority] {
         didSet { defaults.set(priorities.mapValues(\.rawValue), forKey: Key.priorities) }
     }

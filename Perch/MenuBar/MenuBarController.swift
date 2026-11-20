@@ -151,8 +151,9 @@ final class MenuBarController: NSObject, ObservableObject {
 
     // MARK: - Showing and hiding
 
-    /// Shows every icon in the bar. Perch does this only at launch, to picture
-    /// icons for its bar, and as a last resort for an icon it can't open otherwise.
+    /// Shows every icon in the bar: at launch, to picture icons for Perch's
+    /// bar; when Accessibility is turned off or exact pictures are turned on;
+    /// and as a last resort for an icon it can't open otherwise.
     func reveal() {
         stopMenuWatch()
         isTemporaryReveal = false
@@ -186,6 +187,7 @@ final class MenuBarController: NSObject, ObservableObject {
             }
             return
         }
+        hasReset = false
         visibility = .collapsed
         apply()
     }
@@ -196,9 +198,7 @@ final class MenuBarController: NSObject, ObservableObject {
 
     /// Opens a hidden icon picked from the drawer or Spotlight: shows the hidden icons just
     /// long enough for its menu, then hides them again when the menu closes.
-    /// Returns false when Perch is busy arranging and can't open it now.
-    @discardableResult
-    func openTemporarily(_ item: MenuBarItem) -> Bool {
+    func openTemporarily(_ item: MenuBarItem) {
         // A newer open replaces an older one that hasn't finished.
         stopMenuWatch()
         if !visibility.isRevealed {
@@ -223,7 +223,6 @@ final class MenuBarController: NSObject, ObservableObject {
             ItemOpener.open(item, if: isCurrent)
             if self.isTemporaryReveal { self.collapseWhenMenuCloses() }
         }
-        return true
     }
 
     /// The latest `openTemporarily` request; older ones that are still waiting give up.
@@ -555,10 +554,15 @@ final class MenuBarController: NSObject, ObservableObject {
         }
     }
 
-    /// Whether a frame (top-left origin) sits along the top of a screen.
+    /// Whether a frame (top-left origin) sits along the top of a screen, or
+    /// just above it when the menu bar hides itself. (Before it's placed, a
+    /// new item sits at the bottom of the screen.)
     private static func isOnMenuBar(_ frame: CGRect) -> Bool {
         let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
-        return NSScreen.screens.contains { abs((primaryHeight - $0.frame.maxY) - frame.minY) < 2 }
+        return NSScreen.screens.contains {
+            let top = primaryHeight - $0.frame.maxY
+            return frame.minY > top - 60 && frame.minY < top + 2
+        }
     }
 
     private func waitForPlacement() {

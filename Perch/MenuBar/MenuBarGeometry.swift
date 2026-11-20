@@ -21,10 +21,13 @@ enum MenuBarGeometry {
     /// Whether a point (screen coordinates, bottom-left origin) is empty menu
     /// bar space: in the bar, but not on an app menu or any icon. Asks
     /// Accessibility what's under the point; without it, the answer is no.
-    /// Only the front app's own bar counts, so the small gaps between icons don't.
+    /// Only the bar of the app that owns the menu bar counts, so the small gaps between icons don't.
     @MainActor static func isEmptyMenuBarSpace(_ point: NSPoint) -> Bool {
         guard isInMenuBar(point), AXIsProcessTrusted(),
-              let front = NSWorkspace.shared.frontmostApplication?.processIdentifier else { return false }
+              // Not the front app: while Perch's own window is in front, the
+              // menu bar still belongs to the app before it.
+              let front = (NSWorkspace.shared.menuBarOwningApplication
+                  ?? NSWorkspace.shared.frontmostApplication)?.processIdentifier else { return false }
         let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
         var element: AXUIElement?
         // Runs on every click; a busy app must not hold it up.

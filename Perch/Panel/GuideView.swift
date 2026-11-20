@@ -173,7 +173,7 @@ struct GuideView: View {
         case .spotlight:
             title("Search with Spotlight")
             para("Press ⌘Space and type the name of any menu bar icon, such as Wi-Fi, Battery or an app. Choose the result to open its menu, even if the icon is hidden.")
-            para("Perch also adds Shortcuts actions for showing hidden icons and opening Arrange.")
+            para("Perch also adds Shortcuts actions to show hidden icons, open Arrange, and open any menu bar icon by name.")
 
         case .settings:
             title("Settings")
@@ -295,15 +295,24 @@ struct GuideView: View {
 /// Launch at login, as a plain switch.
 struct LoginToggle: View {
     @State private var on = LaunchAtLogin.isEnabled || LaunchAtLogin.needsApproval
+    @State private var needsApproval = LaunchAtLogin.needsApproval
 
     var body: some View {
-        Toggle("", isOn: Binding(get: { on }, set: { value in
-            try? LaunchAtLogin.setEnabled(value)
-            on = LaunchAtLogin.isEnabled || LaunchAtLogin.needsApproval
-        }))
-        .labelsHidden()
-        .toggleStyle(.switch)
-        .controlSize(.small)
+        HStack(spacing: 10) {
+            Toggle("", isOn: Binding(get: { on }, set: { value in
+                try? LaunchAtLogin.setEnabled(value)
+                on = LaunchAtLogin.isEnabled || LaunchAtLogin.needsApproval
+                needsApproval = LaunchAtLogin.needsApproval
+            }))
+            .labelsHidden()
+            .toggleStyle(.switch)
+            .controlSize(.small)
+            if needsApproval {
+                // macOS wants your OK in Login Items first.
+                Button("Allow in Login Items…") { LaunchAtLogin.openLoginItemsSettings() }
+                    .controlSize(.small)
+            }
+        }
     }
 }
 

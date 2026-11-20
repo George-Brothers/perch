@@ -6,9 +6,8 @@ import ApplicationServices
 /// On macOS 26 every menu bar icon's window belongs to Control Center, so the
 /// window list can't say which app owns which icon. Accessibility can: each
 /// app exposes its icons as children of its "extras menu bar".
-/// Runs only when asked (when the Perch panel opens), never on a timer.
+/// Runs only when asked (a pass, or Arrange or Perch's bar opening), never on a timer.
 enum MenuBarScanner {
-    /// Items that are always visible and can't be moved, so listing them is noise.
     private struct AppInfo {
         let pid: pid_t
         let bundleID: String?
