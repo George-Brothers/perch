@@ -11,7 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settings: SettingsWindowController!
     private var arrangePanel: PanelController!
     private var drawer: DrawerController!
-    private var welcomePanel: PanelController!
+    private var welcome: WelcomeWindowController!
     private let images = IconImages()
     private var spotlight: SpotlightIndex!
     private var cancellables = Set<AnyCancellable>()
@@ -39,8 +39,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.menuBar = menuBar
         self.engine = engine
 
-        settings = SettingsWindowController {
-            AnyView(SettingsView(preferences: preferences, permissions: permissions, engine: engine))
+        settings = SettingsWindowController { [weak self] in
+            AnyView(SettingsView(preferences: preferences, permissions: permissions, engine: engine,
+                                 onShowWelcome: { self?.showWelcome() }))
         }
 
         arrangePanel = PanelController(model: engine) { [weak self] in
@@ -151,17 +152,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.arrangePanel.toggle(anchor: menuBar.anchor)
         }
 
-        // First launch: a short welcome, which also asks for Accessibility.
+        // First launch: the welcome tour, which also asks for Accessibility.
         // It counts as seen once it closes with Accessibility allowed, so
         // someone who goes off to allow it sees it again when they come back.
-        welcomePanel = PanelController(model: engine) { [weak self] in
-            AnyView(WelcomeView(permissions: permissions) { self?.welcomePanel.close() })
+        welcome = WelcomeWindowController { [weak self] close in
+            AnyView(WelcomeView(
+                permissions: permissions,
+                preferences: preferences,
+                onShowHiddenIcons: { self?.showHiddenIcons() },
+                onOpenArrange: { self?.showArrange() },
+                onOpenSettings: { self?.settings.show() },
+                onDone: close
+            ))
         }
-        welcomePanel.onOpen = {}
-        welcomePanel.onClose = {
-            if permissions.hasAccessibility { UserDefaults.standard.set(true, forKey: WelcomeView.shownKey) }
+        welcome.onClose = {
+            if permissions.hasAccessibility { UserDefaults.standard.set(true, forKey: WelcomeWindowController.shownKey) }
         }
-        if !UserDefaults.standard.bool(forKey: WelcomeView.shownKey) {
+        if !UserDefaults.standard.bool(forKey: WelcomeWindowController.shownKey) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.showWelcome() }
         }
         permissions.$hasAccessibility
@@ -169,24 +176,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .dropFirst()
             .filter { $0 }
             .sink { [weak self] _ in
-                guard !UserDefaults.standard.bool(forKey: WelcomeView.shownKey) else { return }
+                // Back from System Settings with Accessibility on: bring the tour forward.
+                guard !UserDefaults.standard.bool(forKey: WelcomeWindowController.shownKey) else { return }
                 self?.showWelcome()
             }
             .store(in: &cancellables)
     }
 
-    private enum Panel { case drawer, arrange, welcome }
+    private enum Panel { case drawer, arrange }
 
     /// Only one of Perch's panels is open at a time.
     private func closePanels(except kept: Panel?) {
         if kept != .drawer { drawer.close() }
         if kept != .arrange { arrangePanel.close() }
-        if kept != .welcome { welcomePanel?.close() }
     }
 
-    private func showWelcome() {
-        closePanels(except: .welcome)
-        welcomePanel.open(anchor: menuBar.anchor)
+    func showWelcome() {
+        closePanels(except: nil)
+        welcome.show()
     }
 
     // MARK: - Actions for Spotlight and Shortcuts

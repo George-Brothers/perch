@@ -28,6 +28,8 @@ Perch uses about 15 MB of memory and no CPU while idle. It reacts to events and 
 - **Spotlight**: "Arrange Menu Bar" opens Arrange too.
 - **⌘Space**, then an icon's name: open that icon's menu.
 
+On first launch, a short welcome tour walks through all of this. Reopen it from Settings (Welcome Tour).
+
 ## Build
 
 Requires macOS 26 and Xcode 26. There's no download yet: build it from source.
