@@ -211,9 +211,18 @@ struct ArrangeBar: View {
         BarIcon(item: item, image: images.image(for: item), invert: !images.isLight(item),
                 width: item.frame.width, maxHeight: height, waiting: nil, clickable: false,
                 tooltip: item.isLiveActivity
-                    ? "\(item.displayName) Live Activity. macOS always puts these at the left end of the menu bar, so Perch makes room for them. It goes away when the app ends it."
+                    ? "\(item.displayName) Live Activity, from your iPhone. macOS always puts these at the left end of the menu bar, so Perch makes room for them. Right-click to turn them off."
                     : "\(item.displayName). macOS places this one itself.")
             .opacity(0.75)
+            .contextMenu {
+                if item.isLiveActivity {
+                    Text("\(item.displayName) Live Activity")
+                    Divider()
+                    Button("Turn Off iPhone Live Activities") {
+                        Task { await PhoneLiveActivities.setEnabled(false) }
+                    }
+                }
+            }
     }
 
     @ViewBuilder
