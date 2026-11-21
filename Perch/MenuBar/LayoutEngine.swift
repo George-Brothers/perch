@@ -1098,6 +1098,24 @@ final class LayoutEngine: ObservableObject {
         let perchIndex = list.firstIndex { $0.kind == .perch }
         if let perchIndex { room -= list[perchIndex].width + gap }
 
+        // An icon you hid that turns up among the shown ones (Now Playing
+        // coming back at its old spot, say) shows with them rather than hiding
+        // everything left of it. Only while some icon left of it is showing and
+        // meant to: a new icon macOS puts at the far left can't pull hidden ones back.
+        let showingLeft: [Bool] = {
+            var seen = false
+            return list.map { entry in
+                defer {
+                    if case .icon(let key) = entry.kind,
+                       let item = items.first(where: { $0.key == key }), item.isMovable,
+                       item.section == .shown, preferences.priority(for: key) != .hidden {
+                        seen = true
+                    }
+                }
+                return seen
+            }
+        }()
+
         // Walk right to left; `cut` ends up at the leftmost entry that stays shown.
         let movable = list.filter { $0.kind != .fixed }
         var cut = list.firstIndex { $0.kind == .fixed } ?? list.endIndex
@@ -1111,7 +1129,9 @@ final class LayoutEngine: ObservableObject {
                 continue
             }
             let cost = entry.width + gap
-            guard preferences.priority(for: key) != .hidden, cost <= room else { break }
+            let index = list.firstIndex { $0.kind == entry.kind }
+            let wantsHidden = preferences.priority(for: key) == .hidden && !(index.map { showingLeft[$0] } ?? false)
+            guard !wantsHidden, cost <= room else { break }
             room -= cost
             cut = list.firstIndex { $0.kind == entry.kind } ?? cut
         }
