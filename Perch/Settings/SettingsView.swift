@@ -13,6 +13,8 @@ struct SettingsView: View {
     @State private var explainingDrawer = false
     @State private var spacing = Double(MenuBarSpacing.current)
     @State private var appliedSpacing = MenuBarSpacing.current
+    @State private var phoneLiveActivities = PhoneLiveActivities.isEnabled
+    @State private var switchingLiveActivities = false
 
     var body: some View {
         Form {
@@ -74,6 +76,11 @@ struct SettingsView: View {
                     }
                 }
                 .help("Tighter fits more icons. Apple's icons change right away, others the next time their app opens.")
+                Toggle(isOn: Binding(get: { phoneLiveActivities }, set: setPhoneLiveActivities)) {
+                    Text("iPhone Live Activities")
+                    Text("Running status from your iPhone's apps, like T3 Code. macOS places these itself, so it's all or none here.")
+                }
+                .disabled(switchingLiveActivities)
             }
         }
         .formStyle(.grouped)
@@ -105,6 +112,7 @@ struct SettingsView: View {
             permissions.refresh()
             appliedSpacing = MenuBarSpacing.current
             spacing = Double(appliedSpacing)
+            phoneLiveActivities = PhoneLiveActivities.isEnabled
         }
         .sheet(isPresented: $explainingDrawer) {
             DrawerPermissionSheet(
@@ -141,6 +149,16 @@ struct SettingsView: View {
                 }
             }
         )
+    }
+
+    private func setPhoneLiveActivities(_ on: Bool) {
+        phoneLiveActivities = on
+        switchingLiveActivities = true
+        Task {
+            await PhoneLiveActivities.setEnabled(on)
+            phoneLiveActivities = PhoneLiveActivities.isEnabled
+            switchingLiveActivities = false
+        }
     }
 
     private func setLaunchAtLogin(_ enabled: Bool) {
